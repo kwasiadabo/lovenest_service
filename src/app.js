@@ -1,4 +1,3 @@
-const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -60,14 +59,6 @@ app.post(
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-// Served cross-origin to the Vite dev server, so relax the resource policy
-// helmet sets by default (helmet() above still protects the JSON API).
-app.use(
-  '/uploads',
-  helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }),
-  express.static(path.join(__dirname, '../uploads')),
-);
 
 // More specific /api/v1/* prefixes must be registered before the bare
 // /api/v1 mount below — academicRoutes applies its auth middleware to every

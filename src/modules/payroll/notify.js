@@ -1,7 +1,6 @@
 const { sendMail } = require('../../utils/mailer');
 const { decryptSecret } = require('../../utils/secretCrypto');
 const { buildPayslipPdf } = require('../../utils/payslipPdf');
-const { resolveLogoPath } = require('../../utils/receiptPdf');
 
 function formatAmount(amountPesewas) {
   return `GHS ${(amountPesewas / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -35,7 +34,6 @@ async function notifyPayslips(schoolId, { school, payrollRun, payslips }) {
   const summary = { email: { attempted: 0, sent: 0, failed: 0 } };
   if (!payslips?.length) return summary;
 
-  const logoPath = resolveLogoPath(school?.logoUrl);
   const emailAppPassword = decryptSecret(school?.emailAppPasswordEncrypted);
 
   for (const payslip of payslips) {
@@ -55,7 +53,9 @@ async function notifyPayslips(schoolId, { school, payrollRun, payslips }) {
         }),
         attachments: [
           { filename: `payslip-${payrollRun.payPeriodLabel}.pdf`, content: pdfBuffer },
-          ...(logoPath ? [{ filename: 'logo.png', path: logoPath, cid: 'school-logo' }] : []),
+          // nodemailer's `path` accepts a remote URL directly and streams
+          // it when sending — no local file resolution needed.
+          ...(school?.logoUrl ? [{ filename: 'logo.png', path: school.logoUrl, cid: 'school-logo' }] : []),
         ],
         emailUser: school?.emailUser,
         emailAppPassword,

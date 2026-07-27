@@ -3,7 +3,7 @@ const tenantScoped = require('../../utils/tenantScopedModel');
 const { sendSms } = require('../../utils/sms');
 const { sendMail } = require('../../utils/mailer');
 const { decryptSecret } = require('../../utils/secretCrypto');
-const { buildReceiptPdf, resolveLogoPath } = require('../../utils/receiptPdf');
+const { buildReceiptPdf } = require('../../utils/receiptPdf');
 
 const METHOD_LABELS = {
   CASH: 'Cash',
@@ -87,7 +87,6 @@ async function notifyPaymentReceipt(schoolId, {
       + `${METHOD_LABELS[payment.method] || payment.method}. Receipt #${payment.receiptNumber}. `
       + `${balancePesewas > 0 ? `Balance: ${formatAmount(balancePesewas)}.` : 'Paid in full.'} - ${school?.name || 'School'}`;
 
-  const logoPath = resolveLogoPath(school?.logoUrl);
   const emailAppPassword = decryptSecret(school?.emailAppPasswordEncrypted);
 
   // Each parent's SMS and email are independent network calls with no
@@ -120,7 +119,9 @@ async function notifyPaymentReceipt(schoolId, {
           }),
           attachments: [
             { filename: `receipt-${payment.receiptNumber}.pdf`, content: pdfBuffer },
-            ...(logoPath ? [{ filename: 'logo.png', path: logoPath, cid: 'school-logo' }] : []),
+            // nodemailer's `path` accepts a remote URL directly and streams
+            // it when sending — no local file resolution needed.
+            ...(school?.logoUrl ? [{ filename: 'logo.png', path: school.logoUrl, cid: 'school-logo' }] : []),
           ],
           emailUser: school?.emailUser,
           emailAppPassword,

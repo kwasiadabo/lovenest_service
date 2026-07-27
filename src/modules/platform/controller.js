@@ -1,4 +1,5 @@
 const platformService = require('./service');
+const { uploadImageBuffer } = require('../../lib/cloudinary');
 
 // Multipart form fields arrive as strings even when left blank; treat blank
 // optional fields as unset rather than storing empty strings.
@@ -6,9 +7,15 @@ function orUndefined(value) {
   return typeof value === 'string' && value.trim() === '' ? undefined : value;
 }
 
+async function uploadedLogoUrl(req) {
+  if (!req.file) return undefined;
+  const result = await uploadImageBuffer(req.file.buffer, { folder: 'school-logos' });
+  return result.secure_url;
+}
+
 async function provisionSchool(req, res, next) {
   try {
-    const logoUrl = req.file ? `/uploads/logos/${req.file.filename}` : undefined;
+    const logoUrl = await uploadedLogoUrl(req);
     const {
       name, code, address, phone, email, adminEmail, adminPassword,
       smsSenderId, emailUser, emailAppPassword, studentPopulation,
@@ -38,7 +45,7 @@ async function provisionSchool(req, res, next) {
 
 async function updateSchool(req, res, next) {
   try {
-    const logoUrl = req.file ? `/uploads/logos/${req.file.filename}` : undefined;
+    const logoUrl = await uploadedLogoUrl(req);
     const {
       name, address, phone, email, studentPopulation,
       smsSenderId, emailUser, emailAppPassword,

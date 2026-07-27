@@ -1,5 +1,5 @@
 const PDFDocument = require('pdfkit');
-const { resolveLogoPath } = require('./receiptPdf');
+const { fetchLogoBuffer } = require('./receiptPdf');
 
 const INK = '#0f172a';
 const MUTED = '#64748b';
@@ -43,9 +43,10 @@ function drawRow(doc, y, label, value, { bold = false, muted = false } = {}) {
 // Server-side payslip PDF — attached to the automatic email a staff member
 // gets once their payroll run is paid (see payroll/notify.js), and reused
 // for the on-demand "Payslip PDF" download in the admin/self-service UI.
-function buildPayslipPdf({
+async function buildPayslipPdf({
   school, staff, payrollRun, payslip,
 }) {
+  const logoBuffer = await fetchLogoBuffer(school?.logoUrl);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: [PAGE.width, PAGE.height], margin: 0 });
     const chunks = [];
@@ -56,13 +57,12 @@ function buildPayslipPdf({
     let y = MARGIN;
     const frameTop = MARGIN - 14;
     const LOGO_SIZE = 64;
-    const logoPath = resolveLogoPath(school?.logoUrl);
-    const textX = logoPath ? MARGIN + LOGO_SIZE + 12 : MARGIN;
-    if (logoPath) {
+    const textX = logoBuffer ? MARGIN + LOGO_SIZE + 12 : MARGIN;
+    if (logoBuffer) {
       try {
-        doc.image(logoPath, MARGIN, y, { width: LOGO_SIZE, height: LOGO_SIZE });
+        doc.image(logoBuffer, MARGIN, y, { width: LOGO_SIZE, height: LOGO_SIZE });
       } catch {
-        // Malformed/unreadable logo file — skip it rather than break the payslip.
+        // Malformed/unreadable logo image — skip it rather than break the payslip.
       }
     }
     doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(school?.name || 'School', textX, y, { width: CONTENT_WIDTH - (textX - MARGIN) });

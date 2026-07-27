@@ -1,6 +1,6 @@
 const PDFDocument = require('pdfkit');
 const {
-  resolveLogoPath, formatAmount, formatDateLong, amountInWords, INK, MUTED, BORDER, ACCENT,
+  fetchLogoBuffer, formatAmount, formatDateLong, amountInWords, INK, MUTED, BORDER, ACCENT,
 } = require('./receiptPdf');
 
 // A simpler sibling of receiptPdf.js#buildReceiptPdf, for the platform-level
@@ -15,7 +15,8 @@ const INNER_X = CARD.x + PAD;
 const INNER_RIGHT = CARD.x + CARD.width - PAD;
 const INNER_WIDTH = CARD.width - PAD * 2;
 
-function buildPlatformPaymentReceiptPdf({ school, payment, description }) {
+async function buildPlatformPaymentReceiptPdf({ school, payment, description }) {
+  const logoBuffer = await fetchLogoBuffer(school?.logoUrl);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: [PAGE.width, PAGE.height], margin: 0 });
     const chunks = [];
@@ -25,13 +26,12 @@ function buildPlatformPaymentReceiptPdf({ school, payment, description }) {
 
     let y = CARD.y + PAD;
 
-    const logoPath = resolveLogoPath(school?.logoUrl);
-    const textX = logoPath ? INNER_X + 56 : INNER_X;
-    if (logoPath) {
+    const textX = logoBuffer ? INNER_X + 56 : INNER_X;
+    if (logoBuffer) {
       try {
-        doc.image(logoPath, INNER_X, y, { width: 44, height: 44 });
+        doc.image(logoBuffer, INNER_X, y, { width: 44, height: 44 });
       } catch {
-        // Malformed/unreadable logo file — skip it rather than break the receipt.
+        // Malformed/unreadable logo image — skip it rather than break the receipt.
       }
     }
 

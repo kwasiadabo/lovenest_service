@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const PDFDocument = require('pdfkit');
 
 const METHOD_LABELS = {
@@ -75,14 +73,20 @@ function amountInWords(amountPesewas) {
   return `${cedisWords} and ${integerToWords(pesewas)} Pesewa${pesewas === 1 ? '' : 's'} Only`;
 }
 
-// logoUrl is stored as "/uploads/logos/<file>", served statically from the
-// same uploads/ directory this resolves against — no HTTP round-trip needed
-// since PDF generation runs in the same process as the static file server.
-function resolveLogoPath(logoUrl) {
+// logoUrl is an absolute Cloudinary URL — pdfkit's doc.image() accepts a
+// Buffer directly, so fetch it over HTTP rather than resolving a local
+// path. Returns null (never throws) on any failure — a missing/unreachable
+// logo shouldn't break PDF generation, same as the try/catch already
+// wrapping every doc.image() call site below.
+async function fetchLogoBuffer(logoUrl) {
   if (!logoUrl) return null;
-  const relative = logoUrl.replace(/^\/?uploads\//, '');
-  const absolute = path.join(__dirname, '../../uploads', relative);
-  return fs.existsSync(absolute) ? absolute : null;
+  try {
+    const res = await fetch(logoUrl);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 const PAGE = { width: 595.28, height: 841.89 };
@@ -92,9 +96,10 @@ const INNER_X = CARD.x + PAD;
 const INNER_RIGHT = CARD.x + CARD.width - PAD;
 const INNER_WIDTH = CARD.width - PAD * 2;
 
-function buildReceiptPdf({
+async function buildReceiptPdf({
   school, student, payment, issuedByName, balancePesewas, description = 'School fees payment',
 }) {
+  const logoBuffer = await fetchLogoBuffer(school?.logoUrl);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: [PAGE.width, PAGE.height], margin: 0 });
     const chunks = [];
@@ -106,13 +111,12 @@ function buildReceiptPdf({
     let y = CARD.y + PAD;
 
     // ---- Header: school identity (left) + receipt metadata (right) ----
-    const logoPath = resolveLogoPath(school?.logoUrl);
-    const textX = logoPath ? INNER_X + 56 : INNER_X;
-    if (logoPath) {
+    const textX = logoBuffer ? INNER_X + 56 : INNER_X;
+    if (logoBuffer) {
       try {
-        doc.image(logoPath, INNER_X, y, { width: 44, height: 44 });
+        doc.image(logoBuffer, INNER_X, y, { width: 44, height: 44 });
       } catch {
-        // Malformed/unreadable logo file — skip it rather than break the receipt.
+        // Malformed/unreadable logo image — skip it rather than break the receipt.
       }
     }
 
@@ -245,7 +249,7 @@ function buildReceiptPdf({
 
 module.exports = {
   buildReceiptPdf,
-  resolveLogoPath,
+  fetchLogoBuffer,
   formatAmount,
   formatDateLong,
   amountInWords,
