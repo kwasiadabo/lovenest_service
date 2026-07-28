@@ -82,6 +82,15 @@ function validateConfirmPromotion(req, res, next) {
   return next();
 }
 
+function validateGraduateStudents(req, res, next) {
+  const { studentIds, statusDate } = req.body || {};
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return next(new ApiError(400, 'studentIds is required and must be a non-empty array'));
+  }
+  if (!statusDate) return next(new ApiError(400, 'statusDate is required'));
+  return next();
+}
+
 // A null/absent discountType clears the discount and needs nothing else —
 // only a PERCENT or FLAT type requires its matching value to be checked.
 function validateStudentDiscount(req, res, next) {
@@ -139,6 +148,7 @@ module.exports = {
   validateClassAssignment,
   validatePromotion,
   validateConfirmPromotion,
+  validateGraduateStudents,
   validateRelationshipParam,
   validateBirthdayMessage,
 };

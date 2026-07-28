@@ -422,6 +422,28 @@ async function setStudentStatus(schoolId, studentId, { status, statusDate, statu
   return student;
 }
 
+// A standalone, on-demand graduation action (e.g. for a school's JHS 3
+// cohort) — independent of the year-end confirmPromotion flow below, which
+// only graduates a class as a side effect of a whole-school promotion run.
+// status is hardcoded here, never client-supplied, so this endpoint can't
+// be used to set an arbitrary status.
+async function graduateStudents(schoolId, { studentIds, statusDate }) {
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    throw new ApiError(400, 'studentIds must be a non-empty array');
+  }
+  if (!statusDate) throw new ApiError(400, 'statusDate is required');
+
+  const students = await tenantScoped(Student, schoolId).findAll({ where: { id: studentIds } });
+  if (students.length !== studentIds.length) throw new ApiError(404, 'One or more students not found');
+
+  for (const student of students) {
+    // eslint-disable-next-line no-await-in-loop -- same convention as confirmPromotion's loop
+    await student.update({ status: 'GRADUATED', statusDate, statusNote: null });
+  }
+
+  return { graduatedCount: students.length };
+}
+
 // discountType null clears the discount entirely; otherwise exactly one of
 // discountPercent/discountFlatPesewas is meaningful (validated upstream) and
 // the other is cleared, so a stale value from a previous type never lingers.
@@ -933,6 +955,7 @@ module.exports = {
   createStudent,
   updateStudent,
   setStudentStatus,
+  graduateStudents,
   setStudentDiscount,
   recordAdmissionPayment,
   getAdmissionPaymentsReport,

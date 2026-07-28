@@ -8,8 +8,9 @@ const usersService = require('../users/service');
 // financials/service.js's USER_SUMMARY_ATTRIBUTES.
 const USER_SUMMARY_ATTRIBUTES = ['id', 'email', 'status'];
 
-async function listStaff(schoolId) {
+async function listStaff(schoolId, { status } = {}) {
   return tenantScoped(Staff, schoolId).findAll({
+    where: status ? { status } : undefined,
     order: [['fullName', 'ASC']],
     include: [{ model: User, attributes: USER_SUMMARY_ATTRIBUTES }],
   });
@@ -40,6 +41,32 @@ async function updateStaffMember(schoolId, staffId, data) {
 async function deleteStaffMember(schoolId, staffId) {
   const deleted = await tenantScoped(Staff, schoolId).destroy({ where: { id: staffId } });
   if (!deleted) throw new ApiError(404, 'Staff member not found');
+}
+
+async function separateStaffMember(schoolId, staffId, {
+  separationType, separationReason, lastWorkingDay, rehireEligible,
+}) {
+  const staff = await tenantScoped(Staff, schoolId).findByPk(staffId);
+  if (!staff) throw new ApiError(404, 'Staff member not found');
+  if (!Staff.SEPARATION_TYPES.includes(separationType)) {
+    throw new ApiError(400, `separationType must be one of: ${Staff.SEPARATION_TYPES.join(', ')}`);
+  }
+
+  await staff.update({
+    status: 'SEPARATED',
+    separationType,
+    separationReason: separationReason || null,
+    lastWorkingDay: lastWorkingDay || null,
+    rehireEligible: rehireEligible ?? null,
+  });
+  return staff;
+}
+
+async function reactivateStaffMember(schoolId, staffId) {
+  const staff = await tenantScoped(Staff, schoolId).findByPk(staffId);
+  if (!staff) throw new ApiError(404, 'Staff member not found');
+  await staff.update({ status: 'ACTIVE' });
+  return staff;
 }
 
 // ---- Staff logins ----
@@ -118,13 +145,145 @@ async function listUnlinkedNonParentUsers(schoolId) {
     }));
 }
 
+// ---- Staff attrition analytics ----
+// Same shape/rationale as attendance/service.js#getAttendanceAnalytics: one
+// query, in-memory bucketing (no raw SQL/Sequelize GROUP BY), sorted arrays
+// out. Bucketed by calendar month across the from/to range (default: the
+// last 12 months, ending today). dateHired/lastWorkingDay are DATEONLY
+// columns ("YYYY-MM-DD"), so lexicographic string comparison against another
+// DATEONLY string is a safe, calendar-correct ordering — no Date parsing
+// needed for the comparisons themselves.
+
+function toDateOnlyString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Parses a DATEONLY string ("YYYY-MM-DD") as a local calendar date, not
+// UTC — same rationale as the frontend's lib/formatDate.js#parseLocalDate.
+function parseDateOnly(value) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function endOfMonthString(year, month) {
+  return toDateOnlyString(new Date(year, month + 1, 0));
+}
+
+function startOfMonthString(year, month) {
+  return toDateOnlyString(new Date(year, month, 1));
+}
+
+// Last 12 calendar months, ending with the current month.
+function defaultAttritionRange() {
+  const now = new Date();
+  const from = toDateOnlyString(new Date(now.getFullYear(), now.getMonth() - 11, 1));
+  const to = toDateOnlyString(now);
+  return { from, to };
+}
+
+// Every calendar month touched by [from, to], inclusive.
+function buildMonthBuckets(from, to) {
+  const start = parseDateOnly(from);
+  const end = parseDateOnly(to);
+  const buckets = [];
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  const lastYear = end.getFullYear();
+  const lastMonth = end.getMonth();
+  while (year < lastYear || (year === lastYear && month <= lastMonth)) {
+    buckets.push({ year, month });
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return buckets;
+}
+
+function round1(value) {
+  return Math.round(value * 10) / 10;
+}
+
+async function getStaffAttritionAnalytics(schoolId, { from, to } = {}) {
+  const range = from && to ? { from, to } : defaultAttritionRange();
+
+  // All statuses — separated staff's dateHired/lastWorkingDay feed both the
+  // historical headcount-as-of-each-month-end figure and the separations
+  // numerator, so they can't be excluded the way an "active roster" query
+  // would.
+  const staffList = await tenantScoped(Staff, schoolId).findAll({
+    attributes: ['id', 'dateHired', 'status', 'lastWorkingDay', 'separationType'],
+  });
+
+  const monthlyTrend = buildMonthBuckets(range.from, range.to).map(({ year, month }) => {
+    const monthStart = startOfMonthString(year, month);
+    const monthEnd = endOfMonthString(year, month);
+
+    const headcountEnd = staffList.filter((s) => {
+      if (s.dateHired > monthEnd) return false;
+      if (s.status === 'ACTIVE') return true;
+      return Boolean(s.lastWorkingDay) && s.lastWorkingDay > monthEnd;
+    }).length;
+
+    const separations = staffList.filter((s) => (
+      s.status === 'SEPARATED'
+      && s.lastWorkingDay
+      && s.lastWorkingDay >= monthStart
+      && s.lastWorkingDay <= monthEnd
+    )).length;
+
+    return {
+      month: `${year}-${String(month + 1).padStart(2, '0')}`,
+      headcountEnd,
+      separations,
+      turnoverRatePercent: headcountEnd > 0 ? round1((separations / headcountEnd) * 100) : 0,
+    };
+  });
+
+  const separationsInRange = staffList.filter((s) => (
+    s.status === 'SEPARATED'
+    && s.lastWorkingDay
+    && s.lastWorkingDay >= range.from
+    && s.lastWorkingDay <= range.to
+  ));
+
+  const currentActiveHeadcount = staffList.filter((s) => s.status === 'ACTIVE').length;
+  const totalSeparationsInRange = separationsInRange.length;
+  const overallTurnoverRatePercent = currentActiveHeadcount > 0
+    ? round1((totalSeparationsInRange / currentActiveHeadcount) * 100)
+    : 0;
+
+  const separationTypeBreakdown = Staff.SEPARATION_TYPES.map((separationType) => ({
+    separationType,
+    count: separationsInRange.filter((s) => s.separationType === separationType).length,
+  }));
+
+  return {
+    scope: { from: range.from, to: range.to },
+    summary: {
+      currentActiveHeadcount,
+      totalSeparationsInRange,
+      overallTurnoverRatePercent,
+    },
+    monthlyTrend,
+    separationTypeBreakdown,
+  };
+}
+
 module.exports = {
   listStaff,
   createStaffMember,
   updateStaffMember,
   deleteStaffMember,
+  separateStaffMember,
+  reactivateStaffMember,
   createStaffLogin,
   resetStaffLoginPassword,
   linkStaffToExistingUser,
   listUnlinkedNonParentUsers,
+  getStaffAttritionAnalytics,
 };

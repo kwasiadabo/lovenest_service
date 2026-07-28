@@ -93,6 +93,10 @@ const confirmPromotion = wrap(async (req, res) => {
   res.status(201).json(await studentsService.confirmPromotion(req.schoolId, req.auth.userId, req.body));
 });
 
+const graduateStudents = wrap(async (req, res) => {
+  res.json(await studentsService.graduateStudents(req.schoolId, req.body));
+});
+
 const listPromotionBatches = wrap(async (req, res) => {
   res.json(await studentsService.listPromotionBatches(req.schoolId));
 });
@@ -148,6 +152,7 @@ module.exports = {
   promoteStudents,
   getPromotionPreview,
   confirmPromotion,
+  graduateStudents,
   listPromotionBatches,
   getPromotionBatchDetail,
   createParentLogin,

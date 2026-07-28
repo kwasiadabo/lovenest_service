@@ -127,7 +127,11 @@ async function createPayrollRun(schoolId, userId, { payPeriodStart, payPeriodEnd
   const runId = await sequelize.transaction(async (transaction) => {
     const structures = await tenantScoped(SalaryStructure, schoolId).findAll({
       where: { isActive: true },
-      include: STRUCTURE_INCLUDE,
+      // required: true excludes separated staff from payroll runs — a
+      // dangling active SalaryStructure shouldn't keep paying someone who's
+      // left, and staff/service.js#separateStaffMember doesn't touch this
+      // table, so the filter has to happen here.
+      include: [...STRUCTURE_INCLUDE, { model: Staff, where: { status: 'ACTIVE' }, required: true }],
       transaction,
     });
     if (structures.length === 0) {

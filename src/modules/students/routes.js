@@ -8,6 +8,7 @@ const {
   validateClassAssignment,
   validatePromotion,
   validateConfirmPromotion,
+  validateGraduateStudents,
   validateRelationshipParam,
   validateBirthdayMessage,
 } = require('./validators');
@@ -42,6 +43,7 @@ router.get('/admission-payments', billingRoles, controller.getAdmissionPaymentsR
 router.post('/students', adminOnly, uploadStudentPhoto, validateStudent, controller.createStudent);
 router.patch('/students/:id', adminOnly, uploadStudentPhoto, validateStudent, controller.updateStudent);
 router.patch('/students/:id/status', adminOnly, validateStudentStatus, controller.setStudentStatus);
+router.post('/students/graduate', adminOnly, validateGraduateStudents, controller.graduateStudents);
 router.patch('/students/:id/discount', adminOnly, validateStudentDiscount, controller.setStudentDiscount);
 router.post('/students/:id/admission-payment', adminOnly, validateAdmissionPayment, controller.recordAdmissionPayment);
 router.post(

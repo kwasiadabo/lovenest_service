@@ -17,6 +17,9 @@ const POSITIONS = [
   'Other',
 ];
 
+const STATUSES = ['ACTIVE', 'SEPARATED'];
+const SEPARATION_TYPES = ['RESIGNATION', 'TERMINATION', 'RETIREMENT', 'END_OF_CONTRACT'];
+
 module.exports = (sequelize, DataTypes) => {
   const Staff = sequelize.define('Staff', {
     id: {
@@ -45,14 +48,26 @@ module.exports = (sequelize, DataTypes) => {
     // return.
     ssnitNumber: { type: DataTypes.STRING(30), allowNull: true },
     ghanaCardNumber: { type: DataTypes.STRING(30), allowNull: true },
+    status: { type: DataTypes.ENUM(...STATUSES), allowNull: false, defaultValue: 'ACTIVE' },
+    // Only meaningful once status is SEPARATED — left in place (not cleared)
+    // after a reactivate, same tradeoff Student.statusNote already accepts,
+    // so a second separation simply overwrites these rather than this being
+    // a full multi-event history.
+    separationType: { type: DataTypes.ENUM(...SEPARATION_TYPES), allowNull: true },
+    separationReason: { type: DataTypes.STRING(500), allowNull: true },
+    lastWorkingDay: { type: DataTypes.DATEONLY, allowNull: true },
+    rehireEligible: { type: DataTypes.BOOLEAN, allowNull: true },
   }, {
     tableName: 'staff',
     indexes: [
       { fields: ['schoolId'] },
+      { fields: ['schoolId', 'status'] },
     ],
   });
 
   Staff.POSITIONS = POSITIONS;
+  Staff.STATUSES = STATUSES;
+  Staff.SEPARATION_TYPES = SEPARATION_TYPES;
   // Positions whose staffType is implied, not a free choice — the service
   // layer (staff/service.js) forces staffType to 'TEACHING' whenever
   // `position` is one of these, regardless of what the client submitted.
@@ -69,6 +84,8 @@ module.exports = (sequelize, DataTypes) => {
     });
     Staff.hasMany(models.SubjectTeacher, { foreignKey: 'staffId' });
     Staff.hasMany(models.DutyRoster, { foreignKey: 'staffId' });
+    Staff.hasMany(models.StaffDocument, { foreignKey: 'staffId' });
+    Staff.hasMany(models.StaffAppraisal, { foreignKey: 'staffId' });
   };
 
   return Staff;

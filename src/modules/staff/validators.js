@@ -35,6 +35,15 @@ function validateStaff(req, res, next) {
   return next();
 }
 
+function validateStaffSeparation(req, res, next) {
+  const { separationType } = req.body || {};
+  if (!separationType) return next(new ApiError(400, 'separationType is required'));
+  if (!Staff.SEPARATION_TYPES.includes(separationType)) {
+    return next(new ApiError(400, `separationType must be one of: ${Staff.SEPARATION_TYPES.join(', ')}`));
+  }
+  return next();
+}
+
 function validateCreateLogin(req, res, next) {
   const { roles } = req.body || {};
   if (!Array.isArray(roles) || roles.length === 0) {
@@ -50,4 +59,6 @@ function validateLinkExistingUser(req, res, next) {
   return next();
 }
 
-module.exports = { validateStaff, validateCreateLogin, validateLinkExistingUser };
+module.exports = {
+  validateStaff, validateStaffSeparation, validateCreateLogin, validateLinkExistingUser,
+};
