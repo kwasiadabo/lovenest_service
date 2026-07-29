@@ -1,6 +1,8 @@
 const express = require('express');
 const controller = require('./controller');
-const { validateLevy, validateLevyPayment, validateLevyPaymentUpdate } = require('./validators');
+const {
+  validateLevy, validateLevyPayment, validateLevyPaymentUpdate, validateBulkLevyPayment,
+} = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
@@ -24,7 +26,9 @@ router.post('/levies/:id/close', levyRoles, controller.closeLevy);
 router.post('/levies/:id/reopen', levyRoles, controller.reopenLevy);
 router.delete('/levies/:id', levyRoles, controller.deleteLevy);
 router.get('/levies/:id/collection', levyRoles, controller.getLevyCollection);
+router.get('/levies/:id/period-report', levyRoles, controller.getLevyPeriodReport);
 router.post('/levies/:id/students/:studentId/payments', levyRoles, validateLevyPayment, controller.recordLevyPayment);
+router.post('/levies/:id/bulk-payments', levyRoles, validateBulkLevyPayment, controller.bulkRecordLevyPayments);
 
 router.get('/levy-payments', levyRoles, controller.listLevyPayments);
 router.patch('/levy-payments/:id', levyRoles, validateLevyPaymentUpdate, controller.updateLevyPayment);

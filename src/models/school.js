@@ -47,6 +47,23 @@ module.exports = (sequelize, DataTypes) => {
     // applySuccessfulPayment), so a renewed school gets reminded again next cycle.
     reminder14SentAt: { type: DataTypes.DATE, allowNull: true },
     reminder3SentAt: { type: DataTypes.DATE, allowNull: true },
+    // Termly-indebtedness tracking (distinct from reminder14SentAt/
+    // reminder3SentAt above, which are pre-expiry "N days left" nudges).
+    // Set the first time billing/termBillingService.js#handleTermIndebtedness
+    // finds the school's current term ended/vacated with no successful
+    // Payment against it — either via the daily cron
+    // (billing/reminderService.js) finding an ended unpaid term, or via
+    // academic/service.js's setCurrentTerm/setCurrentAcademicYear finding
+    // the outgoing term unpaid. Both call sites converge on that one
+    // idempotent helper so the clock only ever starts once per debt cycle.
+    // Cleared unconditionally by billing/service.js#applySuccessfulPayment
+    // on any successful subscription payment — this system does not
+    // reconcile debt term-by-term; any payment clears the clock.
+    termGraceEndsAt: { type: DataTypes.DATE, allowNull: true },
+    // Idempotency flag: has the "your term ended, please pay" notification
+    // (in-app + SMS/email) already fired for the currently-outstanding
+    // debt? Same set-once/clear-on-payment lifecycle as termGraceEndsAt.
+    termPaymentPromptSentAt: { type: DataTypes.DATE, allowNull: true },
     // Per-tenant SMS/email sending credentials — each school sends under its
     // own identity rather than a shared platform account. All optional: a
     // school can register without them and add them later via Settings: SMS

@@ -2,12 +2,13 @@ const { Op } = require('sequelize');
 const {
   sequelize, Vehicle, Staff, Student, StudentTransport, Route, PickupPoint, School, PickupRecord,
   DropoffRecord, TransportInvoice, TransportPayment, TransportPaymentRevision, Term, AcademicYear,
-  CashAccount, User,
+  CashAccount, User, VehicleTrip,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
 const assertNotSelfReversal = require('../../utils/assertNotSelfReversal');
-const { notifyPickup, notifyDropoff } = require('./notify');
+const { notifyPickup, notifyDropoff, notifyTripStarted } = require('./notify');
+const { notifyParentsOfStudent } = require('../notifications/service');
 const { notifyPaymentReceipt } = require('../financials/notify');
 const { postJournalEntry, reverseEntryFor } = require('../accounting/ledgerPoster');
 
@@ -1754,6 +1755,225 @@ async function getStudentTransportSummary(schoolId, studentId) {
   };
 }
 
+// ---- Live vehicle trips (driver broadcasts location, parents watch) ----
+// One VehicleTrip row per trip holds only the latest position (see the model
+// comment) — this is "where is the bus right now", not a route-history
+// feature. A driver is whichever Staff row a User is linked to
+// (Staff.userId) that also happens to be a vehicle's driverStaffId; that's
+// re-checked on every trip-control request below, never cached at login,
+// same convention as assertParentOwnsStudent.
+
+async function assertIsAssignedDriver(schoolId, userId, vehicleId) {
+  const staff = await tenantScoped(Staff, schoolId).findOne({ where: { userId } });
+  if (!staff) throw new ApiError(403, 'No staff record is linked to this account.');
+
+  const vehicle = await tenantScoped(Vehicle, schoolId).findByPk(vehicleId);
+  if (!vehicle) throw new ApiError(404, 'Vehicle not found');
+  if (vehicle.driverStaffId !== staff.id) {
+    throw new ApiError(403, 'You are not the assigned driver for this vehicle.');
+  }
+  return { staff, vehicle };
+}
+
+// Includes each vehicle's current trip state so the driver's page can
+// resume correctly after a refresh/re-login mid-trip, instead of offering
+// "Start Trip" again and hitting the already-active 409 from startTrip.
+async function getMyDriverVehicles(schoolId, userId) {
+  const staff = await tenantScoped(Staff, schoolId).findOne({ where: { userId } });
+  if (!staff) return [];
+
+  const vehicles = await tenantScoped(Vehicle, schoolId).findAll({
+    where: { driverStaffId: staff.id, status: 'ACTIVE' },
+    order: [['name', 'ASC']],
+  });
+  if (vehicles.length === 0) return [];
+
+  const activeTrips = await tenantScoped(VehicleTrip, schoolId).findAll({
+    where: { vehicleId: vehicles.map((v) => v.id), status: 'ACTIVE' },
+  });
+  const activeTripByVehicleId = new Map(activeTrips.map((t) => [t.vehicleId, t]));
+
+  return vehicles.map((vehicle) => {
+    const trip = activeTripByVehicleId.get(vehicle.id);
+    return {
+      ...vehicle.toJSON(),
+      activeTrip: trip ? { startedAt: trip.startedAt, tripType: trip.tripType } : null,
+    };
+  });
+}
+
+// Rejects with 409 if a trip is already active for this vehicle — enforced
+// here rather than a DB constraint (see the vehicle_trips migration
+// comment). Fires the "bus has set off" alert right after creating the trip,
+// same call-site pattern as recordStudentDropoff firing notifyDropoff.
+async function startTrip(schoolId, userId, vehicleId, tripType) {
+  const resolvedTripType = tripType || 'PICKUP';
+  if (!VehicleTrip.TRIP_TYPES.includes(resolvedTripType)) {
+    throw new ApiError(400, `tripType must be one of: ${VehicleTrip.TRIP_TYPES.join(', ')}`);
+  }
+
+  const { staff, vehicle } = await assertIsAssignedDriver(schoolId, userId, vehicleId);
+
+  const existingActive = await tenantScoped(VehicleTrip, schoolId).findOne({
+    where: { vehicleId, status: 'ACTIVE' },
+  });
+  if (existingActive) throw new ApiError(409, 'A trip is already active for this vehicle.');
+
+  const trip = await tenantScoped(VehicleTrip, schoolId).create({
+    vehicleId,
+    driverStaffId: staff.id,
+    status: 'ACTIVE',
+    tripType: resolvedTripType,
+    startedAt: new Date(),
+  });
+
+  const roster = await tenantScoped(StudentTransport, schoolId).findAll({
+    where: { vehicleId, status: 'ENROLLED' },
+    include: [Student],
+  });
+
+  const isPickup = resolvedTripType === 'PICKUP';
+  const tripLabel = isPickup ? 'is on its way to pick up students' : 'has set off to drop students home';
+
+  let notifications = { sms: { attempted: 0, sent: 0, failed: 0 }, email: { attempted: 0, sent: 0, failed: 0 } };
+  try {
+    const school = await School.findByPk(schoolId);
+    notifications = await notifyTripStarted(schoolId, {
+      school,
+      vehicle,
+      driverName: staff.fullName,
+      tripType: resolvedTripType,
+      studentIds: roster.map((r) => r.studentId),
+    });
+    // In-app bell notification alongside the SMS/email above — one per
+    // enrolled student, same as every other per-student fan-out in this
+    // codebase (e.g. issues/service.js). A vehicle's roster is small enough
+    // (dozens, not hundreds) that this loop's per-student query cost isn't a
+    // real concern.
+    await Promise.all(roster.map((r) => notifyParentsOfStudent(schoolId, r.studentId, {
+      type: 'TRANSPORT_TRIP_STARTED',
+      title: isPickup ? 'The school bus is on its way' : 'The school bus has set off',
+      body: `${vehicle.name} ${tripLabel}${staff.fullName ? ` — driven by ${staff.fullName}` : ''}.`,
+      linkUrl: `/parent/children/${r.studentId}/transport`,
+    })));
+  } catch (err) {
+    notifications.error = err.message;
+  }
+
+  return { trip, notifications };
+}
+
+async function updateTripLocation(schoolId, userId, vehicleId, { latitude, longitude }) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+
+  const trip = await tenantScoped(VehicleTrip, schoolId).findOne({
+    where: { vehicleId, status: 'ACTIVE' },
+  });
+  if (!trip) throw new ApiError(404, 'No active trip for this vehicle.');
+
+  await trip.update({
+    lastLatitude: Number(latitude),
+    lastLongitude: Number(longitude),
+    lastPingAt: new Date(),
+  });
+  return trip;
+}
+
+async function endTrip(schoolId, userId, vehicleId) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+
+  const trip = await tenantScoped(VehicleTrip, schoolId).findOne({
+    where: { vehicleId, status: 'ACTIVE' },
+  });
+  if (!trip) throw new ApiError(404, 'No active trip for this vehicle.');
+
+  await trip.update({ status: 'ENDED', endedAt: new Date() });
+  return trip;
+}
+
+// Admin "Live Fleet" overview — every vehicle currently mid-trip.
+async function listActiveTrips(schoolId) {
+  const trips = await tenantScoped(VehicleTrip, schoolId).findAll({
+    where: { status: 'ACTIVE' },
+    include: [Vehicle, { model: Staff, as: 'driver' }],
+    order: [['startedAt', 'ASC']],
+  });
+
+  return trips.map((trip) => ({
+    vehicleId: trip.vehicleId,
+    vehicleName: trip.Vehicle?.name || null,
+    driverName: trip.driver?.fullName || null,
+    tripType: trip.tripType,
+    startedAt: trip.startedAt,
+    latitude: trip.lastLatitude,
+    longitude: trip.lastLongitude,
+    lastPingAt: trip.lastPingAt,
+  }));
+}
+
+// Parent-facing live read for one child — scoped through the student the
+// parent already owns (assertParentOwnsStudent runs in parentPortal/
+// service.js before this is called), so no vehicle-level authorization is
+// needed here, same shape as getStudentTransportSummary above.
+async function getLiveTransport(schoolId, studentId) {
+  const subscription = await tenantScoped(StudentTransport, schoolId).findOne({
+    where: { studentId, status: 'ENROLLED' },
+    include: [{ model: Vehicle, include: [{ model: Staff, as: 'driver' }] }],
+  });
+  if (!subscription) return { tripActive: false };
+
+  const trip = await tenantScoped(VehicleTrip, schoolId).findOne({
+    where: { vehicleId: subscription.vehicleId, status: 'ACTIVE' },
+  });
+  if (!trip) return { tripActive: false };
+
+  return {
+    tripActive: true,
+    tripType: trip.tripType,
+    vehicle: {
+      name: subscription.Vehicle.name,
+      driverName: subscription.Vehicle.driver?.fullName || null,
+    },
+    location: {
+      latitude: trip.lastLatitude,
+      longitude: trip.lastLongitude,
+      lastPingAt: trip.lastPingAt,
+    },
+  };
+}
+
+// ---- Driver-scoped pickup/drop-off recording (own vehicle only) ----
+// Thin wrappers around the admin-facing pickup/drop-off functions above —
+// same read/write logic, just gated by assertIsAssignedDriver instead of a
+// SCHOOL_ADMIN-only route, so a driver can record their own vehicle's
+// roster from the trip screen without needing separate admin access.
+
+function todayDateOnly() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function getMyPickupRecord(schoolId, userId, vehicleId, date) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+  return getPickupRecord(schoolId, { vehicleId, date: date || todayDateOnly() });
+}
+
+async function saveMyPickupRecord(schoolId, userId, vehicleId, { date, records }) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+  return savePickupRecord(schoolId, userId, { vehicleId, date: date || todayDateOnly(), records });
+}
+
+async function getMyDropoffRecord(schoolId, userId, vehicleId, date) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+  return getDropoffRecord(schoolId, { vehicleId, date: date || todayDateOnly() });
+}
+
+async function recordMyStudentDropoff(schoolId, userId, vehicleId, { studentId, latitude, longitude, notes }) {
+  await assertIsAssignedDriver(schoolId, userId, vehicleId);
+  return recordStudentDropoff(schoolId, userId, {
+    studentId, vehicleId, latitude, longitude, notes,
+  });
+}
+
 module.exports = {
   listVehicles,
   createVehicle,
@@ -1794,4 +2014,14 @@ module.exports = {
   listTransportPayments,
   getTransportPaymentRevisions,
   getStudentTransportSummary,
+  getMyDriverVehicles,
+  startTrip,
+  updateTripLocation,
+  endTrip,
+  listActiveTrips,
+  getLiveTransport,
+  getMyPickupRecord,
+  saveMyPickupRecord,
+  getMyDropoffRecord,
+  recordMyStudentDropoff,
 };

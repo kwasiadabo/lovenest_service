@@ -149,4 +149,89 @@ async function notifyDropoff(schoolId, {
   return summary;
 }
 
-module.exports = { notifyPickup, notifyDropoff };
+// Fires once, right after a trip starts (transport/service.js#startTrip) —
+// one SMS/email per unique parent across every ENROLLED student on the
+// vehicle (not per-student), same dedupe-by-Parent.id + best-effort/
+// never-throws shape as notifyDropoff above.
+async function notifyTripStarted(schoolId, {
+  school, vehicle, driverName, tripType, studentIds,
+}) {
+  const summary = {
+    sms: { attempted: 0, sent: 0, failed: 0 },
+    email: { attempted: 0, sent: 0, failed: 0 },
+    skippedNoContact: false,
+  };
+  if (studentIds.length === 0) {
+    summary.skippedNoContact = true;
+    return summary;
+  }
+
+  const links = await tenantScoped(StudentParent, schoolId).findAll({
+    where: { studentId: studentIds },
+    include: [Parent],
+  });
+  const uniqueParents = [...new Map(links.map((l) => [l.Parent.id, l.Parent])).values()];
+  if (uniqueParents.length === 0) {
+    summary.skippedNoContact = true;
+    return summary;
+  }
+
+  // PICKUP: bus is heading out to collect students. DROPOFF: bus is heading
+  // out to take them home — same broadcast mechanism, different wording so a
+  // parent isn't left guessing which direction "has set off" means.
+  const isPickup = tripType !== 'DROPOFF';
+  const actionPhrase = isPickup ? 'is on its way to pick up students' : 'has set off to drop students home';
+  const subjectPhrase = isPickup ? 'is on its way' : 'has set off';
+
+  const smsMessage = `Dear Parent, the school bus${vehicle.name ? ` (${vehicle.name})` : ''}`
+    + `${driverName ? ` driven by ${driverName}` : ''} ${actionPhrase}. `
+    + `Track it live in the parent portal under your child's Transport page. - ${school?.name || 'School'}`;
+
+  const emailAppPassword = decryptSecret(school?.emailAppPasswordEncrypted);
+  const emailHtml = `
+    <div style="font-family: Arial, sans-serif; color: #1e293b;">
+      <h2 style="margin-bottom:4px;">${school?.name || 'School'}</h2>
+      <p>Dear Parent/Guardian,</p>
+      <p>
+        The school bus${vehicle.name ? ` <strong>${vehicle.name}</strong>` : ''}
+        ${driverName ? ` (driver: ${driverName})` : ''} ${actionPhrase}.
+      </p>
+      <p>You can track its live location in the parent portal, under your child's Transport page.</p>
+      <p>Thank you.</p>
+    </div>
+  `;
+
+  await Promise.all(uniqueParents.map(async (parent) => {
+    const tasks = [];
+
+    if (parent.phone) {
+      summary.sms.attempted += 1;
+      tasks.push(
+        sendSms({ to: parent.phone, message: smsMessage, senderId: school?.smsSenderId, schoolId })
+          .then((r) => { if (r.ok) summary.sms.sent += 1; else summary.sms.failed += 1; }),
+      );
+    }
+
+    if (parent.email) {
+      summary.email.attempted += 1;
+      tasks.push(
+        sendMail({
+          to: parent.email,
+          subject: `${vehicle.name || 'The school bus'} ${subjectPhrase}`,
+          html: emailHtml,
+          emailUser: school?.emailUser,
+          emailAppPassword,
+          fromName: school?.name,
+        }).then((r) => { if (r.ok) summary.email.sent += 1; else summary.email.failed += 1; }),
+      );
+    }
+
+    await Promise.all(tasks);
+  }));
+
+  return summary;
+}
+
+module.exports = {
+  notifyPickup, notifyDropoff, notifyTripStarted,
+};

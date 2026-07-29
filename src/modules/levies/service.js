@@ -1,8 +1,8 @@
 const { Op } = require('sequelize');
 const {
   sequelize,
-  Levy, LevyClassAmount, LevyPayment, LevyPaymentRevision, AcademicYear, Class, Level, Student,
-  StudentClassAssignment, School, User, CashAccount,
+  Levy, LevyClassAmount, LevyStudent, LevyPayment, LevyPaymentRevision, AcademicYear, Term, Class, Level,
+  Student, StudentClassAssignment, School, User, CashAccount,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
@@ -44,8 +44,20 @@ async function loadClassAmounts(schoolId, levyId) {
   return tenantScoped(LevyClassAmount, schoolId).findAll({ where: { levyId } });
 }
 
-// Returns undefined when the class isn't in scope for a CLASS-targeted levy.
-function effectiveAmountFor(levy, classAmounts, classId) {
+async function loadLevyStudents(schoolId, levyId) {
+  return tenantScoped(LevyStudent, schoolId).findAll({ where: { levyId } });
+}
+
+// Returns undefined when the student/class isn't in scope for a
+// STUDENT/CLASS-targeted levy. STUDENT is checked first and never falls
+// through to the class-amount lookup — a STUDENT-targeted levy's scope is
+// defined purely by LevyStudent rows, independent of classId.
+function effectiveAmountFor(levy, classAmounts, levyStudents, classId, studentId) {
+  if (levy.targetType === 'STUDENT') {
+    const row = (levyStudents || []).find((ls) => ls.studentId === studentId);
+    if (!row) return undefined;
+    return row.amountPesewas != null ? row.amountPesewas : levy.amountPesewas;
+  }
   const row = classAmounts.find((ca) => ca.classId === classId);
   if (levy.targetType === 'CLASS') {
     if (!row) return undefined;
@@ -54,7 +66,19 @@ function effectiveAmountFor(levy, classAmounts, classId) {
   return row && row.amountPesewas != null ? row.amountPesewas : levy.amountPesewas;
 }
 
-async function getInScopeAssignments(schoolId, levy, classAmounts) {
+async function getInScopeAssignments(schoolId, levy, classAmounts, levyStudents) {
+  if (levy.targetType === 'STUDENT') {
+    const studentIds = (levyStudents || []).map((ls) => ls.studentId);
+    if (studentIds.length === 0) return [];
+    return tenantScoped(StudentClassAssignment, schoolId).findAll({
+      where: { academicYearId: levy.academicYearId, studentId: studentIds },
+      include: [
+        { model: Student, where: { status: 'ACTIVE' } },
+        { model: Class, include: [Level] },
+      ],
+    });
+  }
+
   const where = { academicYearId: levy.academicYearId };
   if (levy.targetType === 'CLASS') {
     const classIds = classAmounts.map((ca) => ca.classId);
@@ -70,24 +94,85 @@ async function getInScopeAssignments(schoolId, levy, classAmounts) {
   });
 }
 
+// ---- Recurring/periodic levies ----
+// A levy's obligation is still computed live (never materialized), same as
+// the ONE_TIME case above — a recurring levy just multiplies the resolved
+// per-period base amount by however many periods have elapsed since
+// startDate, and debt accumulates across missed periods rather than
+// resetting (there is deliberately no per-payment period tag: payments sum
+// cumulatively against the running total, exactly like ONE_TIME already
+// works).
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// Computed once per levy (never per student) — a TERMLY levy's count
+// requires a Term query, and every student on the same levy/asOfDate gets
+// the same answer, so hoisting this out of any per-student loop avoids an
+// N+1 query blow-up on computeCollection's per-student iteration.
+async function periodsElapsed(schoolId, levy, asOfDate) {
+  if (levy.frequency === 'ONE_TIME' || !levy.startDate) return 0;
+  if (asOfDate < levy.startDate) return 0; // DATEONLY strings compare lexically
+
+  if (levy.frequency === 'TERMLY') {
+    const terms = await tenantScoped(Term, schoolId).findAll({
+      where: { academicYearId: levy.academicYearId },
+      order: [['sequence', 'ASC']],
+    });
+    return terms.filter((t) => t.startDate <= asOfDate).length;
+  }
+
+  const start = new Date(`${levy.startDate}T00:00:00Z`);
+  const asOf = new Date(`${asOfDate}T00:00:00Z`);
+  const daysElapsed = Math.floor((asOf - start) / MS_PER_DAY);
+
+  if (levy.frequency === 'DAILY') return daysElapsed + 1;
+  if (levy.frequency === 'WEEKLY') return Math.floor(daysElapsed / 7) + 1;
+  if (levy.frequency === 'MONTHLY') {
+    const months = (asOf.getUTCFullYear() - start.getUTCFullYear()) * 12
+      + (asOf.getUTCMonth() - start.getUTCMonth());
+    return months + 1;
+  }
+  return 0;
+}
+
+// The one place the flat/recurring split happens — ONE_TIME passes
+// baseAmount through unchanged (byte-identical to pre-recurrence behavior),
+// everything else multiplies by periods elapsed.
+function applyFrequency(levy, baseAmount, periods) {
+  if (baseAmount === undefined) return undefined;
+  return levy.frequency === 'ONE_TIME' ? baseAmount : baseAmount * periods;
+}
+
+// ONE_TIME sums every payment unconditionally, exactly as before recurring
+// levies existed. Recurring levies exclude payments dated after asOfDate so
+// a report for a past period can't be "fixed" by a later payment — the
+// balance reflects what was actually true as of that date.
+function paidPesewasAsOf(payments, levy, asOfDate) {
+  const relevant = levy.frequency === 'ONE_TIME'
+    ? payments
+    : payments.filter((p) => p.paidDate <= asOfDate);
+  return relevant.reduce((sum, p) => sum + p.amountPesewas, 0);
+}
+
 // A student's owed/paid/balance for one levy — used both by the collection
 // sheet (in bulk, see computeCollection) and by the single-student payment
-// flow below.
-async function computeStudentLevyBalance(schoolId, levy, studentId) {
+// flow below. asOfDate defaults to today (the "live" view); every existing
+// caller omits it, so a ONE_TIME levy's output is unchanged.
+async function computeStudentLevyBalance(schoolId, levy, studentId, asOfDate = todayStr()) {
   const classAmounts = await loadClassAmounts(schoolId, levy.id);
+  const levyStudents = await loadLevyStudents(schoolId, levy.id);
   const assignment = await tenantScoped(StudentClassAssignment, schoolId).findOne({
     where: { academicYearId: levy.academicYearId, studentId },
     include: [{ model: Class, include: [Level] }],
   });
 
-  let owedPesewas = 0;
-  if (assignment) {
-    const amount = effectiveAmountFor(levy, classAmounts, assignment.classId);
-    if (amount !== undefined) owedPesewas = amount;
-  }
+  const base = effectiveAmountFor(levy, classAmounts, levyStudents, assignment?.classId, studentId);
+  const periods = base !== undefined ? await periodsElapsed(schoolId, levy, asOfDate) : 0;
+  const owedPesewas = applyFrequency(levy, base, periods) ?? 0;
 
   const payments = await tenantScoped(LevyPayment, schoolId).findAll({ where: { levyId: levy.id, studentId } });
-  const paidPesewas = payments.reduce((sum, p) => sum + p.amountPesewas, 0);
+  const paidPesewas = paidPesewasAsOf(payments, levy, asOfDate);
 
   return {
     owedPesewas,
@@ -108,7 +193,7 @@ function statusFor(owedPesewas, paidPesewas) {
 // student's own payment lines against it. A levy the student is no longer
 // in scope for (year rollover, class change) still appears if they paid
 // something on it — same orphan-safety rule as computeCollection.
-async function getStudentLevyStatement(schoolId, studentId) {
+async function getStudentLevyStatement(schoolId, studentId, asOfDate = todayStr()) {
   const levies = await tenantScoped(Levy, schoolId).findAll({
     include: [AcademicYear],
     order: [['dueDate', 'DESC'], ['createdAt', 'DESC']],
@@ -129,23 +214,23 @@ async function getStudentLevyStatement(schoolId, studentId) {
   for (const levy of levies) {
     const levyPayments = paymentsByLevyId.get(levy.id) || [];
     const classAmounts = await loadClassAmounts(schoolId, levy.id);
+    const levyStudents = await loadLevyStudents(schoolId, levy.id);
     const assignment = await tenantScoped(StudentClassAssignment, schoolId).findOne({
       where: { academicYearId: levy.academicYearId, studentId },
       include: [{ model: Class, include: [Level] }],
     });
 
+    const base = effectiveAmountFor(levy, classAmounts, levyStudents, assignment?.classId, studentId);
     let owedPesewas = 0;
     let inScope = false;
-    if (assignment) {
-      const amount = effectiveAmountFor(levy, classAmounts, assignment.classId);
-      if (amount !== undefined) {
-        owedPesewas = amount;
-        inScope = true;
-      }
+    if (base !== undefined) {
+      const periods = await periodsElapsed(schoolId, levy, asOfDate);
+      owedPesewas = applyFrequency(levy, base, periods);
+      inScope = true;
     }
     if (!inScope && levyPayments.length === 0) continue;
 
-    const paidPesewas = levyPayments.reduce((sum, p) => sum + p.amountPesewas, 0);
+    const paidPesewas = paidPesewasAsOf(levyPayments, levy, asOfDate);
 
     statements.push({
       levyId: levy.id,
@@ -156,6 +241,7 @@ async function getStudentLevyStatement(schoolId, studentId) {
       startDate: levy.startDate,
       dueDate: levy.dueDate,
       levyStatus: levy.status,
+      frequency: levy.frequency,
       classInfo: classInfoFrom(assignment?.Class),
       owedPesewas,
       paidPesewas,
@@ -179,14 +265,19 @@ async function getStudentLevyStatement(schoolId, studentId) {
 // never silently disappears from the report if the levy's scope/amount is
 // edited afterward) any student who has paid something on this levy even if
 // they're no longer in scope — those rows show owedPesewas: 0.
-async function computeCollection(schoolId, levy) {
+async function computeCollection(schoolId, levy, asOfDate = todayStr()) {
   const classAmounts = await loadClassAmounts(schoolId, levy.id);
-  const assignments = await getInScopeAssignments(schoolId, levy, classAmounts);
+  const levyStudents = await loadLevyStudents(schoolId, levy.id);
+  const assignments = await getInScopeAssignments(schoolId, levy, classAmounts, levyStudents);
   const payments = await tenantScoped(LevyPayment, schoolId).findAll({ where: { levyId: levy.id } });
+  const relevantPayments = levy.frequency === 'ONE_TIME'
+    ? payments
+    : payments.filter((p) => p.paidDate <= asOfDate);
+  const periods = await periodsElapsed(schoolId, levy, asOfDate); // once, shared by every row below
 
   const paidByStudent = new Map();
   const lastPaymentDateByStudent = new Map();
-  for (const payment of payments) {
+  for (const payment of relevantPayments) {
     paidByStudent.set(payment.studentId, (paidByStudent.get(payment.studentId) || 0) + payment.amountPesewas);
     const prev = lastPaymentDateByStudent.get(payment.studentId);
     if (!prev || payment.paidDate > prev) lastPaymentDateByStudent.set(payment.studentId, payment.paidDate);
@@ -194,7 +285,8 @@ async function computeCollection(schoolId, levy) {
 
   const rowByStudentId = new Map();
   for (const assignment of assignments) {
-    const owedPesewas = effectiveAmountFor(levy, classAmounts, assignment.classId) ?? 0;
+    const base = effectiveAmountFor(levy, classAmounts, levyStudents, assignment.classId, assignment.studentId);
+    const owedPesewas = applyFrequency(levy, base, periods) ?? 0;
     const paidPesewas = paidByStudent.get(assignment.studentId) || 0;
     rowByStudentId.set(assignment.studentId, {
       student: assignment.Student,
@@ -285,6 +377,23 @@ async function validateClassIds(schoolId, classAmounts) {
   if (found.length !== new Set(classIds).size) throw new ApiError(404, 'One or more classes not found');
 }
 
+async function replaceLevyStudents(schoolId, levyId, students, transaction) {
+  await tenantScoped(LevyStudent, schoolId).destroy({ where: { levyId }, transaction });
+  if (students && students.length > 0) {
+    await tenantScoped(LevyStudent, schoolId).bulkCreate(
+      students.map((s) => ({ levyId, studentId: s.studentId, amountPesewas: s.amountPesewas ?? null })),
+      { transaction },
+    );
+  }
+}
+
+async function validateStudentIds(schoolId, students) {
+  if (!students || students.length === 0) return;
+  const studentIds = students.map((s) => s.studentId);
+  const found = await tenantScoped(Student, schoolId).findAll({ where: { id: studentIds } });
+  if (found.length !== new Set(studentIds).size) throw new ApiError(404, 'One or more students not found');
+}
+
 async function getLevyDetail(schoolId, levyId) {
   const levy = await tenantScoped(Levy, schoolId).findByPk(levyId, {
     include: [{ model: User, as: 'createdBy', attributes: USER_SUMMARY_ATTRIBUTES }],
@@ -293,6 +402,9 @@ async function getLevyDetail(schoolId, levyId) {
 
   const classAmounts = await tenantScoped(LevyClassAmount, schoolId).findAll({
     where: { levyId }, include: [{ model: Class, include: [Level] }],
+  });
+  const levyStudents = await tenantScoped(LevyStudent, schoolId).findAll({
+    where: { levyId }, include: [Student],
   });
 
   return {
@@ -304,15 +416,23 @@ async function getLevyDetail(schoolId, levyId) {
       levelName: ca.Class?.Level?.name,
       amountPesewas: ca.amountPesewas,
     })),
+    levyStudents: levyStudents.map((ls) => ({
+      id: ls.id,
+      studentId: ls.studentId,
+      studentName: ls.Student?.fullName,
+      amountPesewas: ls.amountPesewas,
+    })),
   };
 }
 
 async function createLevy(schoolId, userId, {
-  academicYearId, name, description, targetType, amountPesewas, startDate, dueDate, classAmounts,
+  academicYearId, name, description, targetType, amountPesewas, startDate, dueDate, frequency, classAmounts,
+  students,
 }) {
   const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
   if (!year) throw new ApiError(404, 'Academic year not found');
   await validateClassIds(schoolId, classAmounts);
+  await validateStudentIds(schoolId, students);
 
   const levy = await sequelize.transaction(async (transaction) => {
     const created = await tenantScoped(Levy, schoolId).create({
@@ -323,9 +443,11 @@ async function createLevy(schoolId, userId, {
       amountPesewas,
       startDate: startDate || null,
       dueDate: dueDate || null,
+      frequency: frequency || 'ONE_TIME',
       createdByUserId: userId,
     }, { transaction });
     await replaceClassAmounts(schoolId, created.id, classAmounts, transaction);
+    await replaceLevyStudents(schoolId, created.id, students, transaction);
     return created;
   });
 
@@ -333,11 +455,12 @@ async function createLevy(schoolId, userId, {
 }
 
 async function updateLevy(schoolId, levyId, {
-  name, description, targetType, amountPesewas, startDate, dueDate, classAmounts,
+  name, description, targetType, amountPesewas, startDate, dueDate, frequency, classAmounts, students,
 }) {
   const levy = await tenantScoped(Levy, schoolId).findByPk(levyId);
   if (!levy) throw new ApiError(404, 'Levy not found');
   await validateClassIds(schoolId, classAmounts);
+  await validateStudentIds(schoolId, students);
 
   await sequelize.transaction(async (transaction) => {
     await levy.update({
@@ -347,8 +470,10 @@ async function updateLevy(schoolId, levyId, {
       amountPesewas,
       startDate: startDate || null,
       dueDate: dueDate || null,
+      frequency: frequency || 'ONE_TIME',
     }, { transaction });
     await replaceClassAmounts(schoolId, levy.id, classAmounts, transaction);
+    await replaceLevyStudents(schoolId, levy.id, students, transaction);
   });
 
   return getLevyDetail(schoolId, levy.id);
@@ -376,6 +501,7 @@ async function deleteLevy(schoolId, levyId) {
 
   await sequelize.transaction(async (transaction) => {
     await tenantScoped(LevyClassAmount, schoolId).destroy({ where: { levyId }, transaction });
+    await tenantScoped(LevyStudent, schoolId).destroy({ where: { levyId }, transaction });
     await tenantScoped(Levy, schoolId).destroy({ where: { id: levyId }, transaction });
   });
 }
@@ -398,6 +524,99 @@ async function getLevyCollection(schoolId, levyId) {
   if (!levy) throw new ApiError(404, 'Levy not found');
   const { rows, byClass, summary } = await computeCollection(schoolId, levy);
   return { levy, rows, byClass, summary };
+}
+
+// ---- Period reporting (recurring levies) ----
+
+// The [periodStart, periodEnd] window a given asOfDate falls into, purely
+// for the "payments actually made during this period" list below — a
+// separate concern from the cumulative owed/paid/balance figures
+// computeCollection already produces (those reflect debt accumulated since
+// startDate, not just this one period).
+function resolvePeriodBoundary(levy, asOfDate, term) {
+  if (levy.frequency === 'TERMLY') return { periodStart: term.startDate, periodEnd: term.endDate };
+
+  if (levy.frequency === 'DAILY' || levy.frequency === 'ONE_TIME') {
+    return {
+      periodStart: levy.frequency === 'ONE_TIME' ? (levy.startDate || null) : asOfDate,
+      periodEnd: asOfDate,
+    };
+  }
+
+  if (levy.frequency === 'WEEKLY') {
+    const d = new Date(`${asOfDate}T00:00:00Z`);
+    const mondayOffset = (d.getUTCDay() + 6) % 7; // 0=Sun..6=Sat -> days since Monday
+    const monday = new Date(d.getTime() - mondayOffset * MS_PER_DAY);
+    const sunday = new Date(monday.getTime() + 6 * MS_PER_DAY);
+    return { periodStart: monday.toISOString().slice(0, 10), periodEnd: sunday.toISOString().slice(0, 10) };
+  }
+
+  // MONTHLY
+  const d = new Date(`${asOfDate}T00:00:00Z`);
+  const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return { periodStart: first.toISOString().slice(0, 10), periodEnd: last.toISOString().slice(0, 10) };
+}
+
+// Which Term to report on for a TERMLY levy when the caller doesn't specify
+// one explicitly: the academic year's isCurrent term, else the latest term
+// that's already started, else the first term (levy hasn't started yet).
+async function resolveReportTerm(schoolId, levy, termId) {
+  if (termId) {
+    const term = await tenantScoped(Term, schoolId).findByPk(termId);
+    if (!term) throw new ApiError(404, 'Term not found');
+    return term;
+  }
+  const terms = await tenantScoped(Term, schoolId).findAll({
+    where: { academicYearId: levy.academicYearId }, order: [['sequence', 'ASC']],
+  });
+  if (terms.length === 0) return null;
+  return terms.find((t) => t.isCurrent)
+    || [...terms].reverse().find((t) => t.startDate <= todayStr())
+    || terms[0];
+}
+
+// A single period's collection sheet: the same owed/paid/balance/status
+// rows computeCollection already produces (as of the resolved period's end
+// date — reflecting accumulated debt, per the "debt accumulates" design),
+// plus a defaulters shortlist and the payments actually dated within that
+// specific period's window. Works for any targetType/frequency, not just
+// canteen levies specifically.
+async function getLevyPeriodReport(schoolId, levyId, { asOfDate, termId } = {}) {
+  const levy = await tenantScoped(Levy, schoolId).findByPk(levyId);
+  if (!levy) throw new ApiError(404, 'Levy not found');
+
+  let term = null;
+  let resolvedAsOfDate = asOfDate || todayStr();
+  if (levy.frequency === 'TERMLY') {
+    term = await resolveReportTerm(schoolId, levy, termId);
+    if (!term) throw new ApiError(400, "No terms exist for this levy's academic year");
+    resolvedAsOfDate = term.endDate;
+  }
+
+  const { rows, byClass, summary } = await computeCollection(schoolId, levy, resolvedAsOfDate);
+  const { periodStart, periodEnd } = resolvePeriodBoundary(levy, resolvedAsOfDate, term);
+
+  const periodPayments = await tenantScoped(LevyPayment, schoolId).findAll({
+    where: periodStart
+      ? { levyId, paidDate: { [Op.between]: [periodStart, periodEnd] } }
+      : { levyId, paidDate: { [Op.lte]: periodEnd } },
+    include: [Student],
+    order: [['paidDate', 'DESC']],
+  });
+
+  return {
+    levy,
+    asOfDate: resolvedAsOfDate,
+    periodStart,
+    periodEnd,
+    term: term ? { id: term.id, name: term.name } : null,
+    rows,
+    byClass,
+    summary,
+    defaulters: rows.filter((r) => r.balancePesewas > 0),
+    payments: periodPayments,
+  };
 }
 
 // ---- Payments ----
@@ -493,6 +712,99 @@ async function recordLevyPayment(schoolId, levyId, studentId, userId, {
   }
 
   return { payment, balancePesewas, notifications };
+}
+
+// Records the same-period payment for several students in one request (a
+// canteen queue/roll-call workflow) — one journal entry per student, same
+// as recordLevyPayment above, but all in a single transaction so a mid-batch
+// failure never leaves a partial, unbalanced set of postings. Every
+// studentId's scope/base amount is resolved and validated up front, before
+// the transaction opens, so an out-of-scope student hard-fails the whole
+// batch rather than silently skipping them.
+async function bulkRecordLevyPayments(schoolId, levyId, userId, {
+  paidDate, method, cashAccountId, records,
+}) {
+  const levy = await tenantScoped(Levy, schoolId).findByPk(levyId);
+  if (!levy) throw new ApiError(404, 'Levy not found');
+  if (levy.status !== 'ACTIVE') throw new ApiError(400, 'This levy is closed to new payments');
+
+  const classAmounts = await loadClassAmounts(schoolId, levy.id);
+  const levyStudents = await loadLevyStudents(schoolId, levy.id);
+  const studentIds = records.map((r) => r.studentId);
+
+  const students = await tenantScoped(Student, schoolId).findAll({ where: { id: studentIds } });
+  if (students.length !== new Set(studentIds).size) throw new ApiError(404, 'One or more students not found');
+  const studentById = new Map(students.map((s) => [s.id, s]));
+
+  const assignments = await tenantScoped(StudentClassAssignment, schoolId).findAll({
+    where: { academicYearId: levy.academicYearId, studentId: studentIds },
+    include: [{ model: Class, include: [Level] }],
+  });
+  const assignmentByStudentId = new Map(assignments.map((a) => [a.studentId, a]));
+
+  const baseByStudentId = new Map();
+  for (const r of records) {
+    const assignment = assignmentByStudentId.get(r.studentId);
+    const base = effectiveAmountFor(levy, classAmounts, levyStudents, assignment?.classId, r.studentId);
+    if (base === undefined) throw new ApiError(400, `Student ${r.studentId} is not in scope for this levy`);
+    baseByStudentId.set(r.studentId, base);
+  }
+
+  const payments = await sequelize.transaction(async (transaction) => {
+    const created = [];
+    for (const r of records) {
+      // One period's rate when the caller doesn't specify an amount — a
+      // canteen worker is charging "today's fee," not asking the student to
+      // clear their whole accumulated balance in one payment.
+      const perPeriodAmount = r.amountPesewas != null
+        ? Number(r.amountPesewas)
+        : applyFrequency(levy, baseByStudentId.get(r.studentId), 1);
+
+      // eslint-disable-next-line no-await-in-loop
+      const payment = await createLevyPaymentWithReceipt(schoolId, {
+        levyId,
+        studentId: r.studentId,
+        amountPesewas: perPeriodAmount,
+        method,
+        paidDate,
+        reference: r.reference || null,
+        notes: r.notes || null,
+        recordedByUserId: userId,
+        cashAccountId,
+      }, transaction);
+      // eslint-disable-next-line no-await-in-loop
+      await postLevyPayment(schoolId, payment, levy, userId, transaction);
+      created.push(payment);
+    }
+    return created;
+  });
+
+  // Best-effort per-student receipts, isolated from the transaction (already
+  // committed above) and from each other — one student's failed SMS/email
+  // must never affect another's or roll back the batch. school/issuer are
+  // fetched once, not per student.
+  const [school, issuer] = await Promise.all([
+    School.findByPk(schoolId),
+    userId ? User.findByPk(userId) : null,
+  ]);
+  const notificationOutcomes = await Promise.allSettled(payments.map(async (payment) => {
+    const { balancePesewas, classInfo } = await computeStudentLevyBalance(schoolId, levy, payment.studentId);
+    const classLabel = classInfo ? [classInfo.className, classInfo.levelName].filter(Boolean).join(' — ') : null;
+    return notifyPaymentReceipt(schoolId, {
+      school,
+      student: { ...studentById.get(payment.studentId).toJSON(), classLabel },
+      payment,
+      balancePesewas,
+      issuedByName: displayName(issuer),
+      description: `${levy.name} payment`,
+    });
+  }));
+
+  return {
+    payments,
+    count: payments.length,
+    notificationFailures: notificationOutcomes.filter((o) => o.status === 'rejected').length,
+  };
 }
 
 async function updateLevyPayment(schoolId, levyPaymentId, userId, {
@@ -698,9 +1010,11 @@ module.exports = {
   listLevies,
   getLevyDetail,
   getLevyCollection,
+  getLevyPeriodReport,
   computeStudentLevyBalance,
   getStudentLevyStatement,
   recordLevyPayment,
+  bulkRecordLevyPayments,
   updateLevyPayment,
   deleteLevyPayment,
   getLevyPaymentReceiptData,

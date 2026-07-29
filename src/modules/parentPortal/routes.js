@@ -21,6 +21,7 @@ router.get('/parent/children/:studentId/sick-bay-visits', controller.getSickBayV
 router.get('/parent/children/:studentId/medication-logs', controller.getMedicationLogs);
 router.get('/parent/children/:studentId/transport', controller.getTransport);
 router.get('/parent/children/:studentId/transport-history', controller.getTransportHistory);
+router.get('/parent/children/:studentId/live-transport', controller.getLiveTransport);
 router.get('/parent/announcements', controller.getAnnouncements);
 router.get('/parent/newsletters', controller.getNewsletters);
 router.get('/parent/issues', controller.listIssues);

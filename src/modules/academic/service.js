@@ -1,6 +1,11 @@
-const { sequelize, AcademicYear, Term, Level, Class, Staff, FeeAmount } = require('../../models');
+const {
+  sequelize, AcademicYear, Term, Level, Class, Staff, FeeAmount, CurrentPeriodChange, User,
+} = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
+const { handleTermIndebtedness } = require('../billing/termBillingService');
+
+const USER_SUMMARY_ATTRIBUTES = ['id', 'fullName', 'email'];
 
 // ---- Academic Years ----
 
@@ -36,16 +41,50 @@ async function updateAcademicYear(schoolId, academicYearId, data) {
   });
 }
 
-async function setCurrentAcademicYear(schoolId, academicYearId) {
+async function setCurrentAcademicYear(schoolId, academicYearId, userId, reason) {
   const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
   if (!year) throw new ApiError(404, 'Academic year not found');
 
-  return sequelize.transaction(async (t) => {
+  let vacatedTerm = null;
+  const result = await sequelize.transaction(async (t) => {
+    const previous = await tenantScoped(AcademicYear, schoolId).findOne({
+      where: { isCurrent: true }, transaction: t,
+    });
+    // The academic-year switch doesn't touch Term.isCurrent — whatever term
+    // is current right now is the last term of the outgoing year, i.e. the
+    // one billing/termBillingService.js needs to check for indebtedness.
+    vacatedTerm = await tenantScoped(Term, schoolId).findOne({
+      where: { isCurrent: true }, transaction: t,
+    });
+
     await AcademicYear.update({ isCurrent: false }, { where: { schoolId }, transaction: t });
     year.isCurrent = true;
     await year.save({ transaction: t });
+
+    await tenantScoped(CurrentPeriodChange, schoolId).create({
+      entityType: 'ACADEMIC_YEAR',
+      previousCurrentId: previous?.id ?? null,
+      previousCurrentLabel: previous?.name ?? null,
+      newCurrentId: year.id,
+      newCurrentLabel: year.name,
+      changedByUserId: userId,
+      reason,
+    }, { transaction: t });
+
     return year;
   });
+
+  // Never blocks or throws back to the caller — a new academic year starts
+  // regardless of indebtedness; this only notifies the admin/headmaster and
+  // starts the 14-day grace clock if it isn't already running.
+  try {
+    await handleTermIndebtedness(schoolId, vacatedTerm);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[academic] term indebtedness check failed:', err);
+  }
+
+  return result;
 }
 
 // ---- Terms ----
@@ -85,16 +124,63 @@ async function updateTerm(schoolId, termId, data) {
   });
 }
 
-async function setCurrentTerm(schoolId, termId) {
+async function setCurrentTerm(schoolId, termId, userId, reason) {
   const term = await tenantScoped(Term, schoolId).findByPk(termId);
   if (!term) throw new ApiError(404, 'Term not found');
 
-  return sequelize.transaction(async (t) => {
+  let vacatedTerm = null;
+  const result = await sequelize.transaction(async (t) => {
+    vacatedTerm = await tenantScoped(Term, schoolId).findOne({
+      where: { isCurrent: true }, transaction: t,
+    });
+
     await Term.update({ isCurrent: false }, { where: { schoolId }, transaction: t });
     term.isCurrent = true;
     await term.save({ transaction: t });
+
+    await tenantScoped(CurrentPeriodChange, schoolId).create({
+      entityType: 'TERM',
+      previousCurrentId: vacatedTerm?.id ?? null,
+      previousCurrentLabel: vacatedTerm?.name ?? null,
+      newCurrentId: term.id,
+      newCurrentLabel: term.name,
+      changedByUserId: userId,
+      reason,
+    }, { transaction: t });
+
     return term;
   });
+
+  // Never blocks or throws back to the caller — the transition always
+  // succeeds; this only notifies the admin/headmaster and starts the
+  // 14-day grace clock if the vacated term went unpaid and one isn't
+  // already running (billing/termBillingService.js#handleTermIndebtedness).
+  try {
+    await handleTermIndebtedness(schoolId, vacatedTerm);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[academic] term indebtedness check failed:', err);
+  }
+
+  return result;
+}
+
+async function getCurrentPeriodHistory(schoolId, entityType) {
+  const changes = await tenantScoped(CurrentPeriodChange, schoolId).findAll({
+    where: entityType ? { entityType } : undefined,
+    include: [{ model: User, as: 'changedBy', attributes: USER_SUMMARY_ATTRIBUTES }],
+    order: [['createdAt', 'DESC']],
+  });
+
+  return changes.map((c) => ({
+    id: c.id,
+    entityType: c.entityType,
+    previousCurrentLabel: c.previousCurrentLabel,
+    newCurrentLabel: c.newCurrentLabel,
+    reason: c.reason,
+    changedAt: c.createdAt,
+    changedByName: c.changedBy?.fullName || c.changedBy?.email || null,
+  }));
 }
 
 // ---- Levels ----
@@ -172,6 +258,7 @@ module.exports = {
   createTerm,
   updateTerm,
   setCurrentTerm,
+  getCurrentPeriodHistory,
   listLevels,
   listClasses,
   createClass,

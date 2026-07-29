@@ -1,6 +1,6 @@
 const ApiError = require('../../utils/ApiError');
 
-const ASSIGNABLE_ROLES = ['SCHOOL_ADMIN', 'ADMINISTRATOR', 'HEAD_TEACHER', 'TEACHER', 'ACCOUNTANT'];
+const ASSIGNABLE_ROLES = ['SCHOOL_ADMIN', 'ADMINISTRATOR', 'HEAD_TEACHER', 'TEACHER', 'ACCOUNTANT', 'DRIVER'];
 
 function validateRoles(roles) {
   if (!Array.isArray(roles) || roles.length === 0) {

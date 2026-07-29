@@ -158,6 +158,14 @@ async function getTransportHistory(schoolId, userId, studentId, { from, to } = {
   return { pickups, dropoffs };
 }
 
+// Polled every ~15s by the parent-facing map (see transport/service.js#
+// getLiveTransport) while a trip is active — ownership check first, same as
+// every other per-child endpoint in this file.
+async function getLiveTransport(schoolId, userId, studentId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+  return transportService.getLiveTransport(schoolId, studentId);
+}
+
 async function createIssue(schoolId, userId, { studentId, subject, body }) {
   return issuesService.createIssue(schoolId, userId, { studentId, subject, body });
 }
@@ -192,4 +200,5 @@ module.exports = {
   getMedicationLogs,
   getTransport,
   getTransportHistory,
+  getLiveTransport,
 };

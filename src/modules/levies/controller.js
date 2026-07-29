@@ -37,9 +37,20 @@ const getLevyCollection = wrap(async (req, res) => {
   res.json(await leviesService.getLevyCollection(req.schoolId, req.params.id));
 });
 
+const getLevyPeriodReport = wrap(async (req, res) => {
+  const { asOfDate, termId } = req.query;
+  res.json(await leviesService.getLevyPeriodReport(req.schoolId, req.params.id, { asOfDate, termId }));
+});
+
 const recordLevyPayment = wrap(async (req, res) => {
   res.status(201).json(
     await leviesService.recordLevyPayment(req.schoolId, req.params.id, req.params.studentId, req.auth.userId, req.body),
+  );
+});
+
+const bulkRecordLevyPayments = wrap(async (req, res) => {
+  res.status(201).json(
+    await leviesService.bulkRecordLevyPayments(req.schoolId, req.params.id, req.auth.userId, req.body),
   );
 });
 
@@ -84,7 +95,9 @@ module.exports = {
   reopenLevy,
   deleteLevy,
   getLevyCollection,
+  getLevyPeriodReport,
   recordLevyPayment,
+  bulkRecordLevyPayments,
   listLevyPayments,
   updateLevyPayment,
   deleteLevyPayment,

@@ -11,6 +11,7 @@ router.use(authenticate, requireTenant, requireRole('SCHOOL_ADMIN'));
 
 router.get('/plans', controller.listPlans);
 router.get('/my-tier', controller.getMyTier);
+router.get('/status', controller.getBillingStatus);
 router.post('/start-trial', controller.startTrial);
 router.post('/initialize', controller.initializePayment);
 router.get('/my-training', controller.getMyTraining);

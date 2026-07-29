@@ -5,7 +5,8 @@ const {
   validatePickupRecordQuery, validatePickupRecordSave, validateStudentPickupHistoryQuery,
   validateDropoffRecordQuery, validateRecordDropoff, validateStudentDropoffHistoryQuery,
   validateGenerateTransportInvoices, validatePreviewTransportInvoices, validateTransportPayment,
-  validateTransportPaymentUpdate,
+  validateTransportPaymentUpdate, validateStartTrip, validateTripLocation,
+  validateMyPickupRecordSave, validateMyDropoffRecord,
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
@@ -25,6 +26,10 @@ const dropoffRecordingRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACH
 // reversal routes. assertNotSelfReversal (service layer) additionally
 // blocks whoever recorded the transaction from being the one to reverse it.
 const reversalRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+// Trip control (start/location/end) is the assigned driver only — ownership
+// is re-checked per-request in transport/service.js#assertIsAssignedDriver,
+// this guard just keeps non-drivers out entirely.
+const driverOnly = requireRole('DRIVER');
 
 router.get('/vehicles', adminOnly, controller.listVehicles);
 router.post('/vehicles', adminOnly, validateVehicle, controller.createVehicle);
@@ -72,5 +77,16 @@ router.get('/transport-payments/:id/revisions', adminOnly, controller.getTranspo
 router.get('/transport-billing-report', adminOnly, controller.getTransportBillingReport);
 router.get('/transport-debtors', adminOnly, controller.getTransportDebtors);
 router.get('/students/:studentId/transport-statement', adminOnly, controller.getStudentTransportStatement);
+
+router.get('/drivers/my-vehicles', driverOnly, controller.getMyDriverVehicles);
+router.post('/vehicles/:vehicleId/trips/start', driverOnly, validateStartTrip, controller.startTrip);
+router.patch('/vehicles/:vehicleId/trips/current/location', driverOnly, validateTripLocation, controller.updateTripLocation);
+router.post('/vehicles/:vehicleId/trips/end', driverOnly, controller.endTrip);
+router.get('/vehicles/trips/active', adminOnly, controller.listActiveTrips);
+
+router.get('/drivers/vehicles/:vehicleId/pickup-record', driverOnly, controller.getMyPickupRecord);
+router.put('/drivers/vehicles/:vehicleId/pickup-record', driverOnly, validateMyPickupRecordSave, controller.saveMyPickupRecord);
+router.get('/drivers/vehicles/:vehicleId/dropoff-record', driverOnly, controller.getMyDropoffRecord);
+router.post('/drivers/vehicles/:vehicleId/dropoff-record', driverOnly, validateMyDropoffRecord, controller.recordMyStudentDropoff);
 
 module.exports = router;

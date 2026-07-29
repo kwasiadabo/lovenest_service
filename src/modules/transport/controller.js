@@ -206,6 +206,49 @@ const getStudentTransportStatement = wrap(async (req, res) => {
   res.json(await transportService.getStudentTransportStatement(req.schoolId, req.params.studentId, { from, to }));
 });
 
+const getMyDriverVehicles = wrap(async (req, res) => {
+  res.json(await transportService.getMyDriverVehicles(req.schoolId, req.auth.userId));
+});
+
+const startTrip = wrap(async (req, res) => {
+  res.status(201).json(await transportService.startTrip(req.schoolId, req.auth.userId, req.params.vehicleId, req.body?.tripType));
+});
+
+const updateTripLocation = wrap(async (req, res) => {
+  const { latitude, longitude } = req.body;
+  res.json(await transportService.updateTripLocation(req.schoolId, req.auth.userId, req.params.vehicleId, { latitude, longitude }));
+});
+
+const endTrip = wrap(async (req, res) => {
+  res.json(await transportService.endTrip(req.schoolId, req.auth.userId, req.params.vehicleId));
+});
+
+const listActiveTrips = wrap(async (req, res) => {
+  res.json(await transportService.listActiveTrips(req.schoolId));
+});
+
+const getMyPickupRecord = wrap(async (req, res) => {
+  res.json(await transportService.getMyPickupRecord(req.schoolId, req.auth.userId, req.params.vehicleId, req.query.date));
+});
+
+const saveMyPickupRecord = wrap(async (req, res) => {
+  const { date, records } = req.body;
+  res.json(await transportService.saveMyPickupRecord(req.schoolId, req.auth.userId, req.params.vehicleId, { date, records }));
+});
+
+const getMyDropoffRecord = wrap(async (req, res) => {
+  res.json(await transportService.getMyDropoffRecord(req.schoolId, req.auth.userId, req.params.vehicleId, req.query.date));
+});
+
+const recordMyStudentDropoff = wrap(async (req, res) => {
+  const {
+    studentId, latitude, longitude, notes,
+  } = req.body;
+  res.status(201).json(await transportService.recordMyStudentDropoff(req.schoolId, req.auth.userId, req.params.vehicleId, {
+    studentId, latitude, longitude, notes,
+  }));
+});
+
 module.exports = {
   listVehicles,
   createVehicle,
@@ -245,4 +288,13 @@ module.exports = {
   getStudentDropoffHistory,
   getDropoffReport,
   getDropoffAnalytics,
+  getMyDriverVehicles,
+  startTrip,
+  updateTripLocation,
+  endTrip,
+  listActiveTrips,
+  getMyPickupRecord,
+  saveMyPickupRecord,
+  getMyDropoffRecord,
+  recordMyStudentDropoff,
 };

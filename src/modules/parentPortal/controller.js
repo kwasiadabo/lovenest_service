@@ -73,6 +73,10 @@ const getTransportHistory = wrap(async (req, res) => {
   res.json(await service.getTransportHistory(req.schoolId, req.auth.userId, req.params.studentId, { from, to }));
 });
 
+const getLiveTransport = wrap(async (req, res) => {
+  res.json(await service.getLiveTransport(req.schoolId, req.auth.userId, req.params.studentId));
+});
+
 module.exports = {
   getChildren,
   getReportCard,
@@ -91,4 +95,5 @@ module.exports = {
   getMedicationLogs,
   getTransport,
   getTransportHistory,
+  getLiveTransport,
 };

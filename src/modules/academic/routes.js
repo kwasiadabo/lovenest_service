@@ -1,6 +1,8 @@
 const express = require('express');
 const controller = require('./controller');
-const { validateAcademicYear, validateTerm, validateClass, validateClassPromotionMapping } = require('./validators');
+const {
+  validateAcademicYear, validateTerm, validateClass, validateClassPromotionMapping, validateSetCurrent,
+} = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
@@ -14,12 +16,21 @@ const adminOnly = requireRole('SCHOOL_ADMIN');
 router.get('/academic-years', controller.listAcademicYears);
 router.post('/academic-years', adminOnly, validateAcademicYear, controller.createAcademicYear);
 router.patch('/academic-years/:academicYearId', adminOnly, controller.updateAcademicYear);
-router.patch('/academic-years/:academicYearId/set-current', adminOnly, controller.setCurrentAcademicYear);
+router.patch(
+  '/academic-years/:academicYearId/set-current',
+  adminOnly,
+  validateSetCurrent,
+  controller.setCurrentAcademicYear,
+);
 
 router.get('/terms', controller.listTerms);
 router.post('/academic-years/:academicYearId/terms', adminOnly, validateTerm, controller.createTerm);
 router.patch('/terms/:termId', adminOnly, controller.updateTerm);
-router.patch('/terms/:termId/set-current', adminOnly, controller.setCurrentTerm);
+router.patch('/terms/:termId/set-current', adminOnly, validateSetCurrent, controller.setCurrentTerm);
+
+// Who changed the current academic year/term, when, and why — SCHOOL_ADMIN
+// only for now, same as set-current itself.
+router.get('/current-period-history', adminOnly, controller.getCurrentPeriodHistory);
 
 router.get('/levels', controller.listLevels);
 

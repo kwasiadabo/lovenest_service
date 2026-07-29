@@ -21,9 +21,29 @@ function validateClassAmounts(targetType, classAmounts) {
   return null;
 }
 
+function validateStudents(targetType, students) {
+  if (targetType === 'STUDENT') {
+    if (!Array.isArray(students) || students.length === 0) {
+      return 'students is required and must be a non-empty array when targetType is STUDENT';
+    }
+  }
+  if (students !== undefined && !Array.isArray(students)) {
+    return 'students must be an array';
+  }
+  if (Array.isArray(students)) {
+    for (const s of students) {
+      if (!s || !s.studentId) return 'Each students entry requires a studentId';
+      if (s.amountPesewas !== undefined && s.amountPesewas !== null && Number(s.amountPesewas) < 0) {
+        return 'students amountPesewas must be a non-negative number';
+      }
+    }
+  }
+  return null;
+}
+
 function validateLevy(req, res, next) {
   const {
-    academicYearId, name, targetType, amountPesewas, startDate, dueDate, classAmounts,
+    academicYearId, name, targetType, amountPesewas, startDate, dueDate, frequency, classAmounts, students,
   } = req.body || {};
 
   if (!academicYearId) return next(new ApiError(400, 'academicYearId is required'));
@@ -39,8 +59,19 @@ function validateLevy(req, res, next) {
     return next(new ApiError(400, 'dueDate cannot be before startDate'));
   }
 
+  const resolvedFrequency = frequency || 'ONE_TIME';
+  if (!Levy.FREQUENCIES.includes(resolvedFrequency)) {
+    return next(new ApiError(400, `frequency must be one of: ${Levy.FREQUENCIES.join(', ')}`));
+  }
+  if (resolvedFrequency !== 'ONE_TIME' && !startDate) {
+    return next(new ApiError(400, 'startDate is required for a recurring levy — it anchors when periods start counting'));
+  }
+
   const classAmountsError = validateClassAmounts(targetType, classAmounts);
   if (classAmountsError) return next(new ApiError(400, classAmountsError));
+
+  const studentsError = validateStudents(targetType, students);
+  if (studentsError) return next(new ApiError(400, studentsError));
 
   return next();
 }
@@ -86,4 +117,40 @@ function validateLevyPaymentUpdate(req, res, next) {
   return next();
 }
 
-module.exports = { validateLevy, validateLevyPayment, validateLevyPaymentUpdate };
+function validateBulkLevyPayment(req, res, next) {
+  const {
+    paidDate, method, cashAccountId, records,
+  } = req.body || {};
+
+  if (!paidDate) return next(new ApiError(400, 'paidDate is required'));
+  if (!method) return next(new ApiError(400, 'method is required'));
+  if (!LevyPayment.METHODS.includes(method)) {
+    return next(new ApiError(400, `method must be one of: ${LevyPayment.METHODS.join(', ')}`));
+  }
+  if (!cashAccountId) {
+    return next(new ApiError(400, 'cashAccountId is required — which cash/bank/mobile-money account received this payment'));
+  }
+  if (!Array.isArray(records) || records.length === 0) {
+    return next(new ApiError(400, 'records is required and must be a non-empty array'));
+  }
+
+  const seenStudentIds = new Set();
+  for (const r of records) {
+    if (!r || !r.studentId) return next(new ApiError(400, 'Each records entry requires a studentId'));
+    if (seenStudentIds.has(r.studentId)) {
+      return next(new ApiError(400, `Student ${r.studentId} appears more than once in this batch`));
+    }
+    seenStudentIds.add(r.studentId);
+    if (r.amountPesewas !== undefined && r.amountPesewas !== null) {
+      if (Number.isNaN(Number(r.amountPesewas)) || Number(r.amountPesewas) <= 0) {
+        return next(new ApiError(400, 'records amountPesewas must be greater than 0 when provided'));
+      }
+    }
+  }
+
+  return next();
+}
+
+module.exports = {
+  validateLevy, validateLevyPayment, validateLevyPaymentUpdate, validateBulkLevyPayment,
+};

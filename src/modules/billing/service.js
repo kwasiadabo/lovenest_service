@@ -1,9 +1,10 @@
 const crypto = require('crypto');
-const { School, Payment, Student, TrainingEnrollment, sequelize } = require('../../models');
+const { School, Payment, Student, Term, TrainingEnrollment, sequelize } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 const { PLANS, getPlan, resolveTierForPopulation } = require('../../config/plans');
 const { SCHOOL_SAFE_ATTRIBUTES } = require('../../utils/schoolSafeQuery');
 const { buildPlatformPaymentReceiptPdf } = require('../../utils/platformReceiptPdf');
+const { isTermSettled } = require('./termBillingService');
 
 const MODE_LABELS = { IN_PERSON: 'In-Person', ONLINE: 'Online' };
 
@@ -77,12 +78,45 @@ async function getMyTier(schoolId) {
   return { plan, populationUsed: population, isFirstCycle: priorSuccessCount === 0 };
 }
 
+// Termly payment/grace status for the frontend to surface to a SCHOOL_ADMIN
+// — whether the current term is settled, and how many days remain in the
+// grace period if it isn't (see billing/termBillingService.js).
+async function getBillingStatus(schoolId) {
+  const school = await School.findByPk(schoolId, SCHOOL_SAFE_ATTRIBUTES);
+  if (!school) {
+    throw new ApiError(404, 'School not found');
+  }
+
+  const currentTerm = await Term.findOne({ where: { schoolId, isCurrent: true } });
+  const isCurrentTermSettled = currentTerm
+    ? await isTermSettled(schoolId, currentTerm.id)
+    : true;
+  const graceDaysLeft = school.termGraceEndsAt
+    ? Math.ceil((new Date(school.termGraceEndsAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    : null;
+
+  return {
+    status: school.status,
+    statusReason: school.statusReason,
+    subscriptionExpiresAt: school.subscriptionExpiresAt,
+    currentTerm: currentTerm
+      ? { id: currentTerm.id, name: currentTerm.name, endDate: currentTerm.endDate }
+      : null,
+    isCurrentTermSettled,
+    termGraceEndsAt: school.termGraceEndsAt,
+    graceDaysLeft,
+  };
+}
+
 async function initializePayment(schoolId, email) {
   const school = await School.findByPk(schoolId, SCHOOL_SAFE_ATTRIBUTES);
   if (!school) {
     throw new ApiError(404, 'School not found');
   }
-  if (!['pending', 'trial', 'suspended'].includes(school.status)) {
+  // 'active' is included because a school stays active through its 14-day
+  // termly grace period (billing/termBillingService.js) — it must be able
+  // to pay off the debt during that window, not only after being suspended.
+  if (!['pending', 'trial', 'suspended', 'active'].includes(school.status)) {
     throw new ApiError(409, 'This school does not need to make a payment right now');
   }
 
@@ -90,6 +124,12 @@ async function initializePayment(schoolId, email) {
 
   const secretKey = requireSecretKey();
   const reference = `vx_${crypto.randomUUID()}`;
+
+  // The payment always targets the school's current term — this is what
+  // makes billing "termly": applySuccessfulPayment below sets
+  // subscriptionExpiresAt from this term's endDate rather than a fixed
+  // duration. null only for a school paying before any term is configured.
+  const currentTerm = await Term.findOne({ where: { schoolId, isCurrent: true } });
 
   const payment = await Payment.create({
     schoolId,
@@ -99,6 +139,7 @@ async function initializePayment(schoolId, email) {
     currency: plan.currency,
     reference,
     status: 'pending',
+    termId: currentTerm ? currentTerm.id : null,
   });
 
   const appUrl = process.env.APP_URL || 'http://localhost:5173';
@@ -235,13 +276,31 @@ async function applySuccessfulPayment(payment) {
     payment.paidAt = new Date();
     await payment.save({ transaction: t });
 
+    // Paid-through date: the settled term's endDate under termly billing,
+    // or the old durationDays fallback for the bootstrap case (a school's
+    // very first payment, made before any Term exists yet — see
+    // initializePayment above).
+    const term = payment.termId
+      ? await Term.findByPk(payment.termId, { transaction: t })
+      : null;
+
     school.status = 'active';
     school.planCode = plan.code;
-    school.subscriptionExpiresAt = new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
+    school.subscriptionExpiresAt = term
+      ? new Date(term.endDate)
+      : new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
     school.smsAllowance = plan.smsAllowance;
     school.smsUsedThisCycle = 0;
     school.reminder14SentAt = null;
     school.reminder3SentAt = null;
+    // Any successful subscription payment clears indebtedness state
+    // unconditionally, even if it doesn't settle the exact term that
+    // triggered the grace clock — this system has no per-term debt ledger,
+    // just "pay to stay current." This also undoes a term_non_payment_auto
+    // suspension, the same way status='active' above already undoes any
+    // other suspension reason.
+    school.termGraceEndsAt = null;
+    school.termPaymentPromptSentAt = null;
     await school.save({ transaction: t });
   });
 
@@ -367,6 +426,7 @@ module.exports = {
   listPlans,
   startTrial,
   getMyTier,
+  getBillingStatus,
   initializePayment,
   getMyTraining,
   initializeTrainingPayment,

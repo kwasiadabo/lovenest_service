@@ -15,7 +15,9 @@ const updateAcademicYear = wrap(async (req, res) => {
 });
 
 const setCurrentAcademicYear = wrap(async (req, res) => {
-  res.json(await academicService.setCurrentAcademicYear(req.schoolId, req.params.academicYearId));
+  res.json(await academicService.setCurrentAcademicYear(
+    req.schoolId, req.params.academicYearId, req.auth.userId, req.body.reason,
+  ));
 });
 
 const listTerms = wrap(async (req, res) => {
@@ -33,7 +35,13 @@ const updateTerm = wrap(async (req, res) => {
 });
 
 const setCurrentTerm = wrap(async (req, res) => {
-  res.json(await academicService.setCurrentTerm(req.schoolId, req.params.termId));
+  res.json(await academicService.setCurrentTerm(
+    req.schoolId, req.params.termId, req.auth.userId, req.body.reason,
+  ));
+});
+
+const getCurrentPeriodHistory = wrap(async (req, res) => {
+  res.json(await academicService.getCurrentPeriodHistory(req.schoolId, req.query.entityType));
 });
 
 const listLevels = wrap(async (req, res) => {
@@ -66,6 +74,7 @@ module.exports = {
   createTerm,
   updateTerm,
   setCurrentTerm,
+  getCurrentPeriodHistory,
   listLevels,
   listClasses,
   createClass,

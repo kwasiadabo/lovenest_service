@@ -1,6 +1,6 @@
 const ApiError = require('../../utils/ApiError');
 const {
-  Vehicle, PickupRecord, StudentTransport, TransportPayment,
+  Vehicle, PickupRecord, StudentTransport, TransportPayment, VehicleTrip,
 } = require('../../models');
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -179,6 +179,51 @@ function validateStudentPickupHistoryQuery(req, res, next) {
   return next();
 }
 
+function validateStartTrip(req, res, next) {
+  const { tripType } = req.body || {};
+  if (tripType && !VehicleTrip.TRIP_TYPES.includes(tripType)) {
+    return next(new ApiError(400, `tripType must be one of: ${VehicleTrip.TRIP_TYPES.join(', ')}`));
+  }
+  return next();
+}
+
+function validateMyPickupRecordSave(req, res, next) {
+  const { records } = req.body || {};
+  if (!Array.isArray(records) || records.length === 0) {
+    return next(new ApiError(400, 'records is required and must be a non-empty array'));
+  }
+  for (const record of records) {
+    if (!record.studentId) return next(new ApiError(400, 'Every record must have a studentId'));
+    if (!PickupRecord.STATUSES.includes(record.status)) {
+      return next(new ApiError(400, `Every record's status must be one of: ${PickupRecord.STATUSES.join(', ')}`));
+    }
+  }
+  return next();
+}
+
+function validateMyDropoffRecord(req, res, next) {
+  const { studentId, latitude, longitude } = req.body || {};
+  if (!studentId) return next(new ApiError(400, 'studentId is required'));
+  if (latitude !== undefined && latitude !== null && latitude !== '' && Number.isNaN(Number(latitude))) {
+    return next(new ApiError(400, 'latitude must be a number'));
+  }
+  if (longitude !== undefined && longitude !== null && longitude !== '' && Number.isNaN(Number(longitude))) {
+    return next(new ApiError(400, 'longitude must be a number'));
+  }
+  return next();
+}
+
+function validateTripLocation(req, res, next) {
+  const { latitude, longitude } = req.body || {};
+  if (latitude === undefined || latitude === null || latitude === '' || Number.isNaN(Number(latitude))) {
+    return next(new ApiError(400, 'latitude is required and must be a number'));
+  }
+  if (longitude === undefined || longitude === null || longitude === '' || Number.isNaN(Number(longitude))) {
+    return next(new ApiError(400, 'longitude is required and must be a number'));
+  }
+  return next();
+}
+
 module.exports = {
   validateVehicle,
   validateRoute,
@@ -194,4 +239,8 @@ module.exports = {
   validatePreviewTransportInvoices,
   validateTransportPayment,
   validateTransportPaymentUpdate,
+  validateStartTrip,
+  validateTripLocation,
+  validateMyPickupRecordSave,
+  validateMyDropoffRecord,
 };

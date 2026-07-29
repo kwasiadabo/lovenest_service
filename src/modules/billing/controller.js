@@ -37,6 +37,15 @@ async function getMyTier(req, res, next) {
   }
 }
 
+async function getBillingStatus(req, res, next) {
+  try {
+    const result = await billingService.getBillingStatus(req.schoolId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getMyTraining(req, res, next) {
   try {
     const enrollment = await billingService.getMyTraining(req.schoolId);
@@ -113,6 +122,7 @@ module.exports = {
   listPlans,
   startTrial,
   getMyTier,
+  getBillingStatus,
   initializePayment,
   getMyTraining,
   initializeTrainingPayment,

@@ -86,6 +86,7 @@ module.exports = (sequelize, DataTypes) => {
     Staff.hasMany(models.DutyRoster, { foreignKey: 'staffId' });
     Staff.hasMany(models.StaffDocument, { foreignKey: 'staffId' });
     Staff.hasMany(models.StaffAppraisal, { foreignKey: 'staffId' });
+    Staff.hasMany(models.VehicleTrip, { foreignKey: 'driverStaffId' });
   };
 
   return Staff;

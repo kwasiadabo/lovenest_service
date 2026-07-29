@@ -1,25 +1,12 @@
 const { Op } = require('sequelize');
-const { School, SchoolStatusEvent } = require('../../models');
+const { School, Term, SchoolStatusEvent } = require('../../models');
 const { sendSms } = require('../../utils/sms');
 const { sendMail } = require('../../utils/mailer');
+const {
+  isTermSettled, handleTermIndebtedness, platformSmsSenderId, platformEmailCreds,
+} = require('./termBillingService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Platform-level contact identity — deliberately NOT the tenant's own
-// School.smsSenderId/emailUser (School model), since a pending/trial/
-// suspended school may not have configured those yet, and this is the
-// platform reaching out to the tenant, not the tenant messaging its own
-// parents. See .env.example for setup notes.
-function platformSmsSenderId() {
-  return process.env.PLATFORM_SMS_SENDER_ID;
-}
-
-function platformEmailCreds() {
-  return {
-    emailUser: process.env.PLATFORM_EMAIL_USER,
-    emailAppPassword: process.env.PLATFORM_EMAIL_APP_PASSWORD,
-  };
-}
 
 function daysLeft(expiresAt) {
   return Math.ceil((new Date(expiresAt).getTime() - Date.now()) / DAY_MS);
@@ -60,6 +47,19 @@ async function sendReminder(school, remainingDays) {
 // Runs daily (see jobs/scheduler.js) — also exposed as a SUPER_ADMIN-only
 // on-demand endpoint (platform/routes.js POST /reminders/run-now) for
 // testing without waiting for the cron tick.
+//
+// subscriptionExpiresAt now doubles as "days left" for the 14-day/3-day
+// pre-expiry nudges below regardless of whether it was set from a term's
+// endDate (active schools, termly billing) or a trial's duration (trial
+// schools) — daysLeft() doesn't need to know which.
+//
+// What happens once expiry actually passes differs by status:
+//  - trial: unchanged — a free, time-boxed evaluation with no grace period.
+//    Immediate, unconditional auto-suspend.
+//  - active: termly billing's grace period applies (see
+//    billing/termBillingService.js) — the current term ending unpaid first
+//    prompts the tenant + starts a 14-day grace clock, and only auto-
+//    suspends once that clock has elapsed with the term still unpaid.
 async function runSubscriptionReminderSweep() {
   const schools = await School.findAll({
     where: {
@@ -68,7 +68,9 @@ async function runSubscriptionReminderSweep() {
     },
   });
 
-  const results = { reminder14: 0, reminder3: 0, suspended: 0, errors: 0 };
+  const results = {
+    reminder14: 0, reminder3: 0, suspended: 0, termSuspended: 0, errors: 0,
+  };
 
   for (const school of schools) {
     // eslint-disable-next-line no-await-in-loop
@@ -101,25 +103,66 @@ async function runSubscriptionReminderSweep() {
         results.reminder3 += 1;
       }
 
-      // Unconditional on the date alone — a safety net independent of
-      // whether either reminder above was ever successfully sent.
-      if (new Date(school.subscriptionExpiresAt).getTime() <= Date.now() && school.status !== 'suspended') {
-        const previousStatus = school.status;
-        school.status = 'suspended';
-        school.statusReason = 'non_payment_auto';
-        school.statusChangedAt = new Date();
-        school.statusChangedByUserId = null;
+      if (school.status === 'trial') {
+        // Unconditional on the date alone, same as before termly billing —
+        // trial has no grace period.
+        if (new Date(school.subscriptionExpiresAt).getTime() <= Date.now()) {
+          const previousStatus = school.status;
+          school.status = 'suspended';
+          school.statusReason = 'non_payment_auto';
+          school.statusChangedAt = new Date();
+          school.statusChangedByUserId = null;
+          // eslint-disable-next-line no-await-in-loop
+          await school.save();
+          // eslint-disable-next-line no-await-in-loop
+          await SchoolStatusEvent.create({
+            schoolId: school.id,
+            actorUserId: null,
+            action: 'auto_suspended_non_payment',
+            previousStatus,
+            newStatus: 'suspended',
+          });
+          results.suspended += 1;
+        }
+      } else {
+        // school.status === 'active'
         // eslint-disable-next-line no-await-in-loop
-        await school.save();
-        // eslint-disable-next-line no-await-in-loop
-        await SchoolStatusEvent.create({
-          schoolId: school.id,
-          actorUserId: null,
-          action: 'auto_suspended_non_payment',
-          previousStatus,
-          newStatus: 'suspended',
-        });
-        results.suspended += 1;
+        const currentTerm = await Term.findOne({ where: { schoolId: school.id, isCurrent: true } });
+        if (currentTerm && new Date(currentTerm.endDate).getTime() < Date.now()) {
+          // eslint-disable-next-line no-await-in-loop
+          const settled = await isTermSettled(school.id, currentTerm.id);
+          if (!settled) {
+            // Idempotent — safe to call every tick. Prompts the tenant
+            // (in-app + SMS/email) and starts the 14-day grace clock the
+            // first time it's called for this debt; a no-op after that.
+            // eslint-disable-next-line no-await-in-loop
+            await handleTermIndebtedness(school.id, currentTerm);
+
+            // eslint-disable-next-line no-await-in-loop
+            const refreshed = await School.findByPk(school.id);
+            if (
+              refreshed.termGraceEndsAt
+              && new Date(refreshed.termGraceEndsAt).getTime() <= Date.now()
+            ) {
+              const previousStatus = refreshed.status;
+              refreshed.status = 'suspended';
+              refreshed.statusReason = 'term_non_payment_auto';
+              refreshed.statusChangedAt = new Date();
+              refreshed.statusChangedByUserId = null;
+              // eslint-disable-next-line no-await-in-loop
+              await refreshed.save();
+              // eslint-disable-next-line no-await-in-loop
+              await SchoolStatusEvent.create({
+                schoolId: school.id,
+                actorUserId: null,
+                action: 'auto_suspended_term_non_payment',
+                previousStatus,
+                newStatus: 'suspended',
+              });
+              results.termSuspended += 1;
+            }
+          }
+        }
       }
     } catch (err) {
       // One bad school (malformed contact info, etc.) must not abort the

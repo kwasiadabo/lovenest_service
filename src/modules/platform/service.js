@@ -153,14 +153,15 @@ async function applyTenantAction(schoolId, action, actorUserId, note) {
     throw new ApiError(404, 'School not found');
   }
 
-  // The correct unblock path for a non-payment auto-suspension is the
-  // tenant paying again (billing/service.js#applySuccessfulPayment already
-  // flips status back to 'active' on success) — a manual reactivate here
-  // would just get re-suspended by the very next cron sweep since
-  // subscriptionExpiresAt is still in the past.
+  // The correct unblock path for a non-payment auto-suspension (trial
+  // expiry OR termly grace-period expiry — see billing/reminderService.js)
+  // is the tenant paying again (billing/service.js#applySuccessfulPayment
+  // already flips status back to 'active' on success) — a manual
+  // reactivate here would just get re-suspended by the very next cron
+  // sweep since subscriptionExpiresAt is still in the past.
   if (
     action === 'reactivate'
-    && school.statusReason === 'non_payment_auto'
+    && ['non_payment_auto', 'term_non_payment_auto'].includes(school.statusReason)
     && school.subscriptionExpiresAt
     && new Date(school.subscriptionExpiresAt).getTime() <= Date.now()
   ) {
