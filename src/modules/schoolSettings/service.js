@@ -9,7 +9,8 @@ async function getSettings(schoolId) {
   const school = await School.findByPk(schoolId, {
     attributes: [
       'id', 'smsSenderId', 'emailUser', 'emailAppPasswordEncrypted',
-      'thirdChildDiscountPercent', 'fourthChildAndAboveDiscountPercent',
+      'thirdChildDiscountPercent', 'fourthChildAndAboveDiscountPercent', 'headteacherSignatureUrl',
+      'paymentInstructions',
     ],
   });
   if (!school) throw new ApiError(404, 'School not found');
@@ -20,6 +21,8 @@ async function getSettings(schoolId) {
     emailAppPasswordSet: !!school.emailAppPasswordEncrypted,
     thirdChildDiscountPercent: Number(school.thirdChildDiscountPercent),
     fourthChildAndAboveDiscountPercent: Number(school.fourthChildAndAboveDiscountPercent),
+    headteacherSignatureUrl: school.headteacherSignatureUrl,
+    paymentInstructions: school.paymentInstructions,
   };
 }
 
@@ -32,11 +35,12 @@ async function getSettings(schoolId) {
 // can't show back to the admin.
 async function updateSettings(schoolId, {
   smsSenderId, emailUser, emailAppPassword, thirdChildDiscountPercent, fourthChildAndAboveDiscountPercent,
+  paymentInstructions,
 }) {
   const school = await School.findByPk(schoolId, {
     attributes: [
       'id', 'smsSenderId', 'emailUser', 'emailAppPasswordEncrypted',
-      'thirdChildDiscountPercent', 'fourthChildAndAboveDiscountPercent',
+      'thirdChildDiscountPercent', 'fourthChildAndAboveDiscountPercent', 'paymentInstructions',
     ],
   });
   if (!school) throw new ApiError(404, 'School not found');
@@ -50,6 +54,7 @@ async function updateSettings(schoolId, {
   if (fourthChildAndAboveDiscountPercent !== undefined) {
     school.fourthChildAndAboveDiscountPercent = Number(fourthChildAndAboveDiscountPercent);
   }
+  if (paymentInstructions !== undefined) school.paymentInstructions = paymentInstructions.trim() || null;
 
   await school.save();
 
@@ -59,7 +64,22 @@ async function updateSettings(schoolId, {
     emailAppPasswordSet: !!school.emailAppPasswordEncrypted,
     thirdChildDiscountPercent: Number(school.thirdChildDiscountPercent),
     fourthChildAndAboveDiscountPercent: Number(school.fourthChildAndAboveDiscountPercent),
+    paymentInstructions: school.paymentInstructions,
   };
 }
 
-module.exports = { getSettings, updateSettings };
+async function updateSignature(schoolId, signatureUrl) {
+  const school = await School.findByPk(schoolId, { attributes: ['id', 'headteacherSignatureUrl'] });
+  if (!school) throw new ApiError(404, 'School not found');
+
+  if (signatureUrl !== undefined) {
+    school.headteacherSignatureUrl = signatureUrl;
+    await school.save();
+  }
+
+  return { headteacherSignatureUrl: school.headteacherSignatureUrl };
+}
+
+module.exports = {
+  getSettings, updateSettings, updateSignature,
+};

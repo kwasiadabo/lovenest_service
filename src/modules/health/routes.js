@@ -3,7 +3,7 @@ const controller = require('./controller');
 const { validateSickBayVisit, validateMedicationLog, validateImmunization } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
@@ -12,8 +12,8 @@ router.use(authenticate, requireTenant);
 // ADMINISTRATOR is this app's "elevated non-teaching staff" role — the
 // closest fit for a school nurse/clinic officer, who has no dedicated role
 // of their own. HEAD_TEACHER gets read access for oversight, not write.
-const canView = requireRole('SCHOOL_ADMIN', 'ADMINISTRATOR', 'HEAD_TEACHER');
-const canRecord = requireRole('SCHOOL_ADMIN', 'ADMINISTRATOR');
+const canView = requirePermission('health', 'VIEW');
+const canRecord = requirePermission('health', 'MANAGE');
 
 router.get('/health/analytics', canView, controller.getHealthAnalytics);
 

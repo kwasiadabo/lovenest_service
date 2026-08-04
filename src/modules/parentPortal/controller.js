@@ -27,6 +27,10 @@ const getAttendance = wrap(async (req, res) => {
   res.json(await service.getAttendance(req.schoolId, req.auth.userId, req.params.studentId, req.query.termId));
 });
 
+const getDailyActivities = wrap(async (req, res) => {
+  res.json(await service.getDailyActivities(req.schoolId, req.auth.userId, req.params.studentId, req.query.termId));
+});
+
 const getAnnouncements = wrap(async (req, res) => {
   res.json(await service.getAnnouncements(req.schoolId));
 });
@@ -84,6 +88,7 @@ module.exports = {
   getStudentLevies,
   getFinancialStatement,
   getAttendance,
+  getDailyActivities,
   getAnnouncements,
   getNewsletters,
   createIssue,

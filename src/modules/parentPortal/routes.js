@@ -16,6 +16,7 @@ router.get('/parent/children/:studentId/bills', controller.getStudentBills);
 router.get('/parent/children/:studentId/levies', controller.getStudentLevies);
 router.get('/parent/children/:studentId/financial-statement', controller.getFinancialStatement);
 router.get('/parent/children/:studentId/attendance', validateReportCardQuery, controller.getAttendance);
+router.get('/parent/children/:studentId/creche-activities', validateReportCardQuery, controller.getDailyActivities);
 router.get('/parent/children/:studentId/incidents', controller.getIncidents);
 router.get('/parent/children/:studentId/sick-bay-visits', controller.getSickBayVisits);
 router.get('/parent/children/:studentId/medication-logs', controller.getMedicationLogs);

@@ -57,9 +57,11 @@ async function login(email, password) {
       schoolStatus: user.School ? user.School.status : null,
       schoolName: user.School ? user.School.name : null,
       schoolLogoUrl: user.School ? user.School.logoUrl : null,
+      schoolHeadteacherSignatureUrl: user.School ? user.School.headteacherSignatureUrl : null,
       schoolAddress: user.School ? user.School.address : null,
       schoolPhone: user.School ? user.School.phone : null,
       schoolEmail: user.School ? user.School.email : null,
+      schoolPaymentInstructions: user.School ? user.School.paymentInstructions : null,
       schoolPlanCode: user.School ? user.School.planCode : null,
       subscriptionExpiresAt: user.School ? user.School.subscriptionExpiresAt : null,
       // null for schools provisioned before this feature existed (no
@@ -117,10 +119,11 @@ async function requestPasswordReset(email) {
     const appUrl = process.env.APP_URL || 'http://localhost:5173';
     const resetUrl = `${appUrl}/reset-password?token=${rawToken}`;
 
-    // No email/SMS provider is wired up yet, so log the link for local testing.
-    console.log(`[password reset] ${email}: ${resetUrl}`);
-
+    // No email/SMS provider is wired up yet, so log the link for local testing
+    // — gated the same as the response fields below, so a raw reset token
+    // never lands in production logs.
     if (process.env.NODE_ENV !== 'production') {
+      console.log(`[password reset] ${email}: ${resetUrl}`);
       return { message: GENERIC_RESET_MESSAGE, resetUrl, resetToken: rawToken };
     }
   }

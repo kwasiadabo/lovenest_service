@@ -28,15 +28,22 @@ async function createAcademicYear(schoolId, { name, startDate, endDate, isCurren
   });
 }
 
-async function updateAcademicYear(schoolId, academicYearId, data) {
+// Explicit field whitelist, not a raw `.update(req.body)` — schoolId is
+// owned by tenantScoped's own enforcement; letting a caller set it directly
+// here would let them reassign this academic year to another school.
+async function updateAcademicYear(schoolId, academicYearId, {
+  name, startDate, endDate, isCurrent,
+}) {
   const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
   if (!year) throw new ApiError(404, 'Academic year not found');
 
   return sequelize.transaction(async (t) => {
-    if (data.isCurrent) {
+    if (isCurrent) {
       await AcademicYear.update({ isCurrent: false }, { where: { schoolId }, transaction: t });
     }
-    await year.update(data, { transaction: t });
+    await year.update({
+      name, startDate, endDate, isCurrent,
+    }, { transaction: t });
     return year;
   });
 }
@@ -111,15 +118,23 @@ async function createTerm(schoolId, academicYearId, { name, sequence, startDate,
   });
 }
 
-async function updateTerm(schoolId, termId, data) {
+// Same explicit-whitelist rationale as updateAcademicYear above — schoolId
+// and academicYearId must never be settable via this path (the latter would
+// let a caller move a term into a different academic year outside the
+// dedicated create/promotion flows).
+async function updateTerm(schoolId, termId, {
+  name, sequence, startDate, endDate, isCurrent,
+}) {
   const term = await tenantScoped(Term, schoolId).findByPk(termId);
   if (!term) throw new ApiError(404, 'Term not found');
 
   return sequelize.transaction(async (t) => {
-    if (data.isCurrent) {
+    if (isCurrent) {
       await Term.update({ isCurrent: false }, { where: { schoolId }, transaction: t });
     }
-    await term.update(data, { transaction: t });
+    await term.update({
+      name, sequence, startDate, endDate, isCurrent,
+    }, { transaction: t });
     return term;
   });
 }

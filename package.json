@@ -12,7 +12,11 @@
     "migrate:undo": "sequelize-cli db:migrate:undo",
     "seed": "sequelize-cli db:seed:all",
     "verify:tenant-isolation": "node scripts/verifyTenantIsolation.js",
-    "test": "jest --runInBand"
+    "test": "NODE_ENV=test jest --runInBand --forceExit",
+    "test:unit": "NODE_ENV=test jest --runInBand --forceExit tests/unit",
+    "test:integration": "NODE_ENV=test jest --runInBand --forceExit tests/integration",
+    "test:json": "NODE_ENV=test jest --runInBand --forceExit --json --outputFile=test-results/jest-results.json",
+    "test:pdf": "node scripts/generateTestReportPdf.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

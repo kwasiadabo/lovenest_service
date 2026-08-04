@@ -1,5 +1,5 @@
 const {
-  sequelize, Activity, ActivityRating, Class, Level, Term, Staff,
+  sequelize, Activity, ActivityRating, ActivityDailyLog, Class, Level, Term, Staff,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
@@ -16,6 +16,18 @@ const RATING_LABELS = {
   EXCELLING: 'Excelling',
 };
 const RATING_VALUES = Object.keys(RATING_LABELS);
+
+// Deliberately a different scale from the termly RATING_LABELS above — the
+// daily log is a quick, everyday check-in (not a term assessment), so it
+// gets its own 5-point scale rather than reusing the report-card one.
+const DAILY_RATING_LABELS = {
+  STRUGGLED: 'Struggled',
+  NEEDS_SUPPORT: 'Needs Support',
+  OKAY: 'Okay',
+  GOOD: 'Good',
+  EXCELLENT: 'Excellent',
+};
+const DAILY_RATING_VALUES = Object.keys(DAILY_RATING_LABELS);
 
 async function resolveClass(schoolId, classId) {
   const klass = await tenantScoped(Class, schoolId).findByPk(classId, { include: [Level] });
@@ -208,6 +220,116 @@ async function reopenRatings(schoolId, userId, roles, { classId, termId }) {
   return { reopenedCount };
 }
 
+// Daily log: same class-teacher scope check as the termly grid, but keyed
+// by a specific date instead of a term+confirm/lock workflow — a teacher
+// can freely revise any day's entries, there's nothing to "confirm & lock"
+// here.
+async function getDailyLogGrid(schoolId, userId, roles, { classId, termId, date }) {
+  await assertClassScopeAccess(schoolId, { userId, roles, classId });
+
+  const klass = await resolveClass(schoolId, classId);
+  const students = await resolveRoster(schoolId, classId, termId);
+  const activities = await listActivities(schoolId, klass.levelId);
+
+  const activityIds = activities.map((a) => a.id);
+  const entryRows = activityIds.length > 0
+    ? await tenantScoped(ActivityDailyLog, schoolId).findAll({
+      where: { activityId: activityIds, classId, date },
+      include: [{ model: Staff, as: 'recordedBy' }],
+    })
+    : [];
+
+  const entriesByStudent = {};
+  for (const row of entryRows) {
+    entriesByStudent[row.studentId] = entriesByStudent[row.studentId] || {};
+    entriesByStudent[row.studentId][row.activityId] = {
+      rating: row.rating,
+      note: row.note,
+      recordedByName: row.recordedBy ? row.recordedBy.fullName : null,
+    };
+  }
+
+  return {
+    levelName: klass.Level ? klass.Level.name : null,
+    students,
+    activities: activities.map((a) => ({
+      id: a.id,
+      domain: a.domain,
+      name: a.name,
+      description: a.description,
+    })),
+    entries: entriesByStudent,
+    ratingLabels: DAILY_RATING_LABELS,
+  };
+}
+
+async function saveDailyLogEntry(schoolId, userId, roles, {
+  activityId, classId, termId, studentId, date, rating, note,
+}) {
+  await assertClassScopeAccess(schoolId, { userId, roles, classId });
+
+  if (!DAILY_RATING_VALUES.includes(rating)) {
+    throw new ApiError(400, `rating must be one of: ${DAILY_RATING_VALUES.join(', ')}`);
+  }
+
+  const activity = await tenantScoped(Activity, schoolId).findByPk(activityId);
+  if (!activity) throw new ApiError(404, 'Activity not found');
+
+  const klass = await resolveClass(schoolId, classId);
+  if (activity.levelId !== klass.levelId) {
+    throw new ApiError(400, 'This activity does not belong to this class\'s level.');
+  }
+
+  const term = await tenantScoped(Term, schoolId).findByPk(termId);
+  if (!term) throw new ApiError(404, 'Term not found');
+
+  const staffMember = await tenantScoped(Staff, schoolId).findOne({ where: { userId } });
+
+  const existing = await tenantScoped(ActivityDailyLog, schoolId).findOne({
+    where: {
+      activityId, classId, studentId, date,
+    },
+  });
+
+  const values = {
+    rating, note: note || null, recordedByStaffId: staffMember ? staffMember.id : null,
+  };
+  const saved = existing
+    ? await existing.update(values)
+    : await tenantScoped(ActivityDailyLog, schoolId).create({
+      activityId, classId, termId, studentId, date, ...values,
+    });
+
+  return { ...saved.toJSON(), recordedByName: staffMember ? staffMember.fullName : null };
+}
+
+// Parent-facing read — every daily log entry for a student within a term,
+// newest first, grouped by date. Consumed by parentPortal/service.js after
+// its own assertParentOwnsStudent check, same delegation shape as
+// attendanceService.getStudentAttendanceReport.
+async function getStudentDailyLog(schoolId, { studentId, termId }) {
+  const rows = await tenantScoped(ActivityDailyLog, schoolId).findAll({
+    where: { studentId, termId },
+    include: [{ model: Activity }],
+    order: [['date', 'DESC']],
+  });
+
+  const byDate = new Map();
+  for (const row of rows) {
+    if (!byDate.has(row.date)) byDate.set(row.date, []);
+    byDate.get(row.date).push({
+      activityId: row.activityId,
+      activityName: row.Activity ? row.Activity.name : null,
+      domain: row.Activity ? row.Activity.domain : null,
+      rating: row.rating,
+      ratingLabel: DAILY_RATING_LABELS[row.rating],
+      note: row.note,
+    });
+  }
+
+  return [...byDate.entries()].map(([date, entries]) => ({ date, entries }));
+}
+
 // Consumed by reportCards/service.js for Nursery/KG report cards — grouped
 // by domain, each activity flagged `pending` when there's no CONFIRMED
 // rating yet, same convention as computeSubjectRow's pending flag (a report
@@ -247,6 +369,7 @@ async function getConfirmedRatingsForReportCard(schoolId, { classId, termId, stu
 
 module.exports = {
   RATING_LABELS,
+  DAILY_RATING_LABELS,
   listActivities,
   createActivity,
   updateActivity,
@@ -255,5 +378,8 @@ module.exports = {
   saveRating,
   confirmRatings,
   reopenRatings,
+  getDailyLogGrid,
+  saveDailyLogEntry,
+  getStudentDailyLog,
   getConfirmedRatingsForReportCard,
 };

@@ -6,17 +6,18 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
+const readRoles = requirePermission('payroll', 'VIEW');
 // Compensation data is sensitive — salary structure edits and payroll
 // approval are SCHOOL_ADMIN only, tighter than the general accounting
-// bookkeeping tier.
+// bookkeeping tier, and not part of the editable matrix.
 const adminOnly = requireRole('SCHOOL_ADMIN');
-const payRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const payRoles = requirePermission('payroll', 'MANAGE');
 
 router.get('/staff/:staffId/salary-structure', readRoles, controller.getSalaryStructure);
 router.post('/staff/:staffId/salary-structure', adminOnly, validateSalaryStructure, controller.setSalaryStructure);

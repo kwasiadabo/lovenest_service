@@ -5,18 +5,18 @@ const {
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const levyRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
+const levyRoles = requirePermission('levies', 'CONTRIBUTE');
 // Reversing an already-posted payment is a narrower privilege than the
 // levyRoles actions above — same role set as transport/financials'
 // reversal routes. assertNotSelfReversal (service layer) additionally
 // blocks whoever recorded the payment from being the one to reverse it.
-const reversalRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const reversalRoles = requirePermission('levies', 'MANAGE');
 
 router.post('/levies', levyRoles, validateLevy, controller.createLevy);
 router.get('/levies', levyRoles, controller.listLevies);

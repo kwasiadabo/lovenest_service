@@ -6,14 +6,14 @@ const {
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const reportCardRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACHER');
-const headteacherOrAdmin = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const reportCardRoles = requirePermission('reportCards', 'CONTRIBUTE');
+const headteacherOrAdmin = requirePermission('reportCards', 'MANAGE');
 
 router.get('/report-cards/generate', reportCardRoles, validateGenerateQuery, controller.generate);
 router.get('/report-cards/class-summary', reportCardRoles, validateClassSummaryQuery, controller.classSummary);

@@ -4,7 +4,7 @@ const { validateImportType, validateFilePresent } = require('./validators');
 const { uploadImportFile } = require('../../middleware/importUpload');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
@@ -12,7 +12,7 @@ router.use(authenticate, requireTenant);
 
 // Onboarding-scale bulk import is an admin task, same gating as creating
 // students/vehicles directly.
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('dataImport', 'MANAGE');
 
 router.get('/imports/:type/template', adminOnly, validateImportType, controller.getTemplate);
 router.post('/imports/:type/preview', adminOnly, validateImportType, uploadImportFile, validateFilePresent, controller.preview);

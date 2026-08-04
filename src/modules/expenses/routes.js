@@ -6,18 +6,22 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
+// Item-catalog setup stays SCHOOL_ADMIN-only, not part of the editable
+// matrix — same "most sensitive action in this module stays hardcoded"
+// treatment as accounting's ledgerAdminRoles/payroll's salary-structure.
 const adminOnly = requireRole('SCHOOL_ADMIN');
-const requestRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'ADMINISTRATOR');
-const approveRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const requestRoles = requirePermission('expenses', 'CONTRIBUTE');
+const approveRoles = requirePermission('expenses', 'MANAGE');
 // Both requesters and approvers need to see the list/report — the finer
 // "is this your own request" distinction is enforced in the service layer,
 // not by role alone.
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'ADMINISTRATOR', 'HEAD_TEACHER');
+const readRoles = requirePermission('expenses', 'VIEW');
 
 router.get('/expense-items', adminOnly, controller.listExpenseItems);
 router.post('/expense-items', adminOnly, validateExpenseItem, controller.createExpenseItem);

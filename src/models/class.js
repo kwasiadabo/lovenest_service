@@ -1,3 +1,5 @@
+const FEE_BILLING_CYCLES = ['TERMLY', 'MONTHLY'];
+
 module.exports = (sequelize, DataTypes) => {
   const Class = sequelize.define('Class', {
     id: {
@@ -15,6 +17,17 @@ module.exports = (sequelize, DataTypes) => {
     // getPromotionPreview surfaces that as a warning rather than guessing.
     nextClassId: { type: DataTypes.UUID, allowNull: true },
     isGraduatingClass: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    // Almost every class bills TERMLY like the rest of the school. A class
+    // opted into MONTHLY (typically a pre-school class) is billed via
+    // financials/service.js's monthly path instead: FeeAmount rows for it
+    // are termId-less recurring rates (see feeamount.js), and its Bills
+    // carry a periodMonth/periodYear instead of a termId. Lives on Class,
+    // not Level, because Level is fixed/not admin-editable (see
+    // utils/defaultLevels.js) and the single merged "Pre-school" Level can
+    // contain both monthly and non-monthly classes.
+    feeBillingCycle: {
+      type: DataTypes.ENUM(...FEE_BILLING_CYCLES), allowNull: false, defaultValue: 'TERMLY',
+    },
   }, {
     tableName: 'classes',
     indexes: [
@@ -36,6 +49,8 @@ module.exports = (sequelize, DataTypes) => {
     });
     Class.hasMany(models.SubjectTeacher, { foreignKey: 'classId' });
   };
+
+  Class.FEE_BILLING_CYCLES = FEE_BILLING_CYCLES;
 
   return Class;
 };

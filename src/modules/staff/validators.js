@@ -1,6 +1,5 @@
 const ApiError = require('../../utils/ApiError');
 const { Staff } = require('../../models');
-const { ASSIGNABLE_ROLES } = require('../users/validators');
 
 function requireFields(body, fields) {
   for (const field of fields) {
@@ -44,13 +43,17 @@ function validateStaffSeparation(req, res, next) {
   return next();
 }
 
+// Shape only — whether each name actually resolves to a role this school
+// may assign (a built-in, or one of its own custom roles — see
+// modules/roles) is checked in users/service.js#createUser, which
+// createStaffLogin (staff/service.js) delegates to.
 function validateCreateLogin(req, res, next) {
   const { roles } = req.body || {};
   if (!Array.isArray(roles) || roles.length === 0) {
     return next(new ApiError(400, 'roles must be a non-empty array'));
   }
-  const invalid = roles.find((role) => !ASSIGNABLE_ROLES.includes(role));
-  if (invalid) return next(new ApiError(400, `${invalid} is not an assignable role`));
+  const invalid = roles.find((role) => typeof role !== 'string' || !role.trim());
+  if (invalid !== undefined) return next(new ApiError(400, 'Each role must be a non-empty string'));
   return next();
 }
 

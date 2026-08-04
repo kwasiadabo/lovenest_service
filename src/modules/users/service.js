@@ -1,10 +1,23 @@
 const bcrypt = require('bcrypt');
+const { Op } = require('sequelize');
 const { User, Role, Staff, Parent } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
 
 const SALT_ROUNDS = 12;
 const DEFAULT_PASSWORD = process.env.DEFAULT_USER_PASSWORD || 'Welcome123!';
+
+// Resolves role names to rows for this school specifically — a name match
+// alone isn't enough once schools can define their own custom roles
+// (modules/roles): two different schools' custom roles can share a name,
+// so without the schoolId filter this could attach a user to another
+// school's role row. Built-ins (schoolId null) are still visible to every
+// school, same as before.
+function findAssignableRoles(schoolId, names) {
+  return Role.findAll({
+    where: { name: names, [Op.or]: [{ schoolId: null }, { schoolId }] },
+  });
+}
 
 function serializeUser(user) {
   return {
@@ -67,7 +80,7 @@ async function createUser(schoolId, { fullName, email, roles }) {
     throw new ApiError(409, 'That email is already registered');
   }
 
-  const roleRows = await Role.findAll({ where: { name: roles } });
+  const roleRows = await findAssignableRoles(schoolId, roles);
   if (roleRows.length !== roles.length) {
     throw new ApiError(400, 'One or more roles could not be found');
   }
@@ -136,7 +149,7 @@ async function updateUserRoles(schoolId, userId, roles) {
     }
   }
 
-  const roleRows = await Role.findAll({ where: { name: roles } });
+  const roleRows = await findAssignableRoles(schoolId, roles);
   if (roleRows.length !== roles.length) {
     throw new ApiError(400, 'One or more roles could not be found');
   }

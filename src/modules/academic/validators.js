@@ -1,4 +1,5 @@
 const ApiError = require('../../utils/ApiError');
+const { Class } = require('../../models');
 
 function requireFields(body, fields) {
   for (const field of fields) {
@@ -32,14 +33,19 @@ function validateClass(req, res, next) {
 
 // A class's promotion config is at most one of "promotes to X" or "graduates
 // here" — never both. Applies to PATCH (create doesn't set these yet, the
-// mapping is configured afterward from the Classes page).
+// mapping is configured afterward from the Classes page). Also covers
+// feeBillingCycle (Termly/Monthly, see models/class.js) since it's edited
+// from the same PATCH.
 function validateClassPromotionMapping(req, res, next) {
-  const { nextClassId, isGraduatingClass } = req.body || {};
+  const { nextClassId, isGraduatingClass, feeBillingCycle } = req.body || {};
   if (nextClassId && isGraduatingClass) {
     return next(new ApiError(400, 'A class cannot both promote to another class and be marked as graduating'));
   }
   if (nextClassId && nextClassId === req.params.classId) {
     return next(new ApiError(400, 'A class cannot promote to itself'));
+  }
+  if (feeBillingCycle !== undefined && !Class.FEE_BILLING_CYCLES.includes(feeBillingCycle)) {
+    return next(new ApiError(400, `feeBillingCycle must be one of: ${Class.FEE_BILLING_CYCLES.join(', ')}`));
   }
   return next();
 }

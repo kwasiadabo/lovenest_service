@@ -1,4 +1,5 @@
 const billingService = require('./service');
+const onboardingPaymentService = require('../onboarding/paymentService');
 const { User } = require('../../models');
 
 async function listPlans(req, res, next) {
@@ -67,7 +68,7 @@ async function initializeTrainingPayment(req, res, next) {
 
 async function verifyPayment(req, res, next) {
   try {
-    const result = await billingService.verifyPayment(req.params.reference);
+    const result = await billingService.verifyPayment(req.schoolId, req.params.reference);
     res.json({
       school: result.school, status: result.payment.status, purpose: result.payment.purpose,
     });
@@ -100,7 +101,11 @@ async function getPaymentReceipt(req, res, next) {
 
 // Public endpoint called directly by Paystack — no JWT, verified via HMAC
 // signature instead. Mounted with express.raw() so the body is available
-// as an untouched Buffer for the signature check.
+// as an untouched Buffer for the signature check. Serves both this
+// module's own payments AND the marketing site's pre-registration payments
+// (see onboarding/paymentService.js) — one Paystack webhook URL, both
+// handlers check the event's reference prefix and no-op if it isn't
+// theirs, so dispatching to both here is safe either way.
 async function webhook(req, res, next) {
   try {
     const signature = req.headers['x-paystack-signature'];
@@ -112,6 +117,7 @@ async function webhook(req, res, next) {
 
     const event = JSON.parse(rawBody.toString('utf8'));
     await billingService.handleWebhookEvent(event);
+    await onboardingPaymentService.handleWebhookEvent(event);
     return res.status(200).json({ received: true });
   } catch (err) {
     return next(err);

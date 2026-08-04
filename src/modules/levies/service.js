@@ -1020,4 +1020,11 @@ module.exports = {
   getLevyPaymentReceiptData,
   listLevyPayments,
   getLevyPaymentRevisions,
+  // Internal period-math helpers — exported only for
+  // tests/unit/levies.periodMath.test.js, not meant to be used outside this
+  // module otherwise.
+  periodsElapsed,
+  applyFrequency,
+  paidPesewasAsOf,
+  resolvePeriodBoundary,
 };

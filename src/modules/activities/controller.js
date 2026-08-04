@@ -36,6 +36,15 @@ const reopenRatings = wrap(async (req, res) => {
   res.json(await service.reopenRatings(req.schoolId, req.auth.userId, req.auth.roles, req.body));
 });
 
+const getDailyLogGrid = wrap(async (req, res) => {
+  const { classId, termId, date } = req.query;
+  res.json(await service.getDailyLogGrid(req.schoolId, req.auth.userId, req.auth.roles, { classId, termId, date }));
+});
+
+const saveDailyLogEntry = wrap(async (req, res) => {
+  res.json(await service.saveDailyLogEntry(req.schoolId, req.auth.userId, req.auth.roles, req.body));
+});
+
 module.exports = {
   listActivities,
   createActivity,
@@ -45,4 +54,6 @@ module.exports = {
   saveRating,
   confirmRatings,
   reopenRatings,
+  getDailyLogGrid,
+  saveDailyLogEntry,
 };

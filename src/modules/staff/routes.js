@@ -5,13 +5,13 @@ const {
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('staff', 'MANAGE');
 
 router.get('/staff', adminOnly, controller.listStaff);
 router.post('/staff', adminOnly, validateStaff, controller.createStaffMember);

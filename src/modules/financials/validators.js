@@ -1,14 +1,24 @@
 const ApiError = require('../../utils/ApiError');
-const { BillPayment } = require('../../models');
+const { BillPayment, Bill } = require('../../models');
 
 const TARGET_TYPES = ['LEVEL', 'CLASS', 'STUDENT'];
 
-function validateGenerateBills(req, res, next) {
+// Shared by /bills/generate and /bills/preview — a preview must accept
+// exactly what generation would, so what it shows is what would happen.
+function validateBillPeriodPayload(req, res, next) {
   const {
-    academicYearId, termId, targetType, targetIds, feeTypeIds,
+    billingCycle = 'TERMLY', academicYearId, termId, month, year, targetType, targetIds, feeTypeIds,
   } = req.body || {};
-  if (!academicYearId) return next(new ApiError(400, 'academicYearId is required'));
-  if (!termId) return next(new ApiError(400, 'termId is required'));
+  if (!Bill.BILLING_CYCLES.includes(billingCycle)) {
+    return next(new ApiError(400, `billingCycle must be one of: ${Bill.BILLING_CYCLES.join(', ')}`));
+  }
+  if (billingCycle === 'MONTHLY') {
+    if (!month) return next(new ApiError(400, 'month is required for monthly billing'));
+    if (!year) return next(new ApiError(400, 'year is required for monthly billing'));
+  } else {
+    if (!academicYearId) return next(new ApiError(400, 'academicYearId is required'));
+    if (!termId) return next(new ApiError(400, 'termId is required'));
+  }
   if (!TARGET_TYPES.includes(targetType)) {
     return next(new ApiError(400, `targetType must be one of: ${TARGET_TYPES.join(', ')}`));
   }
@@ -90,6 +100,11 @@ function validateSendReminders(req, res, next) {
 }
 
 module.exports = {
-  validateGenerateBills, validateSpecialItem, validatePayment, validatePaymentUpdate, validateConfirmBatch,
+  validateGenerateBills: validateBillPeriodPayload,
+  validatePreviewBills: validateBillPeriodPayload,
+  validateSpecialItem,
+  validatePayment,
+  validatePaymentUpdate,
+  validateConfirmBatch,
   validateSendReminders,
 };

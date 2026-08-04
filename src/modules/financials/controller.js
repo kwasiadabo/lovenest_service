@@ -7,12 +7,21 @@ const generateBills = wrap(async (req, res) => {
   res.status(201).json(await financialsService.generateBills(req.schoolId, req.auth.userId, req.body));
 });
 
+const previewBillGeneration = wrap(async (req, res) => {
+  const {
+    billingCycle, academicYearId, termId, month, year, targetType, targetIds, feeTypeIds,
+  } = req.body;
+  res.json(await financialsService.previewBillGeneration(req.schoolId, {
+    billingCycle, academicYearId, termId, month, year, targetType, targetIds, feeTypeIds,
+  }));
+});
+
 const listBills = wrap(async (req, res) => {
   const {
-    academicYearId, termId, status, levelId, classId, studentId,
+    academicYearId, termId, billingCycle, periodMonth, periodYear, status, levelId, classId, studentId,
   } = req.query;
   res.json(await financialsService.listBills(req.schoolId, {
-    academicYearId, termId, status, levelId, classId, studentId,
+    academicYearId, termId, billingCycle, periodMonth, periodYear, status, levelId, classId, studentId,
   }));
 });
 
@@ -102,6 +111,7 @@ const sendDebtReminders = wrap(async (req, res) => {
 
 module.exports = {
   generateBills,
+  previewBillGeneration,
   listBills,
   confirmBill,
   confirmBills,

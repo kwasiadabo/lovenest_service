@@ -14,6 +14,18 @@ module.exports = (sequelize, DataTypes) => {
     phone: DataTypes.STRING(30),
     email: DataTypes.STRING,
     logoUrl: DataTypes.STRING,
+    // Uploaded by the school's own admin via Settings (see schoolSettings
+    // module) — a school-level image rather than tied to a specific Staff
+    // record, since there's no canonical "the headteacher" record (Staff
+    // .position and the HEAD_TEACHER auth role are unrelated and neither is
+    // unique per school). Printed on report cards in place of the blank
+    // signature line once set.
+    headteacherSignatureUrl: DataTypes.STRING,
+    // Free-text note shown on printed/downloaded bills alongside the payment
+    // accounts (e.g. "Pay before the 5th of each month" or bank-specific
+    // notes) — school-level since it applies to every bill, not tied to a
+    // single PaymentAccount row.
+    paymentInstructions: DataTypes.TEXT,
     // 'pending' (provisioned, no plan chosen yet) -> 'trial' | 'active' (plan
     // chosen; 'active' after a paid plan is verified) -> 'suspended'.
     status: {

@@ -148,6 +148,14 @@ async function runReminderSweepNow(req, res, next) {
   }
 }
 
+async function runMonthlyBillingSweepNow(req, res, next) {
+  try {
+    res.json(await platformService.runMonthlyBillingSweepNow());
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getStatutorySettings(req, res, next) {
   try {
     const settings = await platformService.getStatutorySettings();
@@ -190,6 +198,7 @@ module.exports = {
   getTenantHealthAnalytics,
   getUsageAnalytics,
   runReminderSweepNow,
+  runMonthlyBillingSweepNow,
   getStatutorySettings,
   setSsnitRate,
   setPayeTaxBands,

@@ -8,19 +8,21 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
 // Read access to statements/reports mirrors financials' billingRoles.
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
+const readRoles = requirePermission('accounting', 'VIEW');
 // Chart of Accounts / cash transfers / cash-account creation are
 // bookkeeping-setup actions, same tier as Fee Types/Expense Items.
-const bookkeepingRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const bookkeepingRoles = requirePermission('accounting', 'CONTRIBUTE');
 // Manual journal entries and cash-account setup mutate the books directly
 // with no secondary business object backing them — the most sensitive
-// writes in the subsystem, so SCHOOL_ADMIN only.
+// writes in the subsystem, so SCHOOL_ADMIN only, not part of the editable
+// matrix (same treatment as payroll's salary-structure/expenses' item-catalog).
 const ledgerAdminRoles = requireRole('SCHOOL_ADMIN');
 
 router.get('/accounts', readRoles, controller.listAccounts);

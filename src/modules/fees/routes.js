@@ -3,13 +3,13 @@ const controller = require('./controller');
 const { validateFeeType, validateFeeAmount } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('feesSetup', 'MANAGE');
 
 router.get('/fee-types', adminOnly, controller.listFeeTypes);
 router.post('/fee-types', adminOnly, validateFeeType, controller.createFeeType);

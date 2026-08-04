@@ -13,6 +13,7 @@ const { normalizeSchoolCode } = require('../../utils/schoolCodeGuard');
 const { encryptSecret } = require('../../utils/secretCrypto');
 const { SCHOOL_SAFE_ATTRIBUTES } = require('../../utils/schoolSafeQuery');
 const { runSubscriptionReminderSweep } = require('../billing/reminderService');
+const { runMonthlyBillingSweep } = require('../financials/monthlyBillingScheduler');
 const { TRAINING_COSTS_PESEWAS } = require('../../config/training');
 
 const SALT_ROUNDS = 12;
@@ -299,6 +300,10 @@ async function runReminderSweepNow() {
   return runSubscriptionReminderSweep();
 }
 
+async function runMonthlyBillingSweepNow() {
+  return runMonthlyBillingSweep(new Date(), { force: true });
+}
+
 // ---- Statutory settings: SSNIT rate + PAYE tax bands ----
 // Platform-level, national data shared by every school's payroll (see
 // models/ssnitrate.js, models/payetaxband.js) — SUPER_ADMIN only.
@@ -371,6 +376,7 @@ module.exports = {
   getTenantHealthAnalytics,
   getUsageAnalytics,
   runReminderSweepNow,
+  runMonthlyBillingSweepNow,
   getStatutorySettings,
   setSsnitRate,
   setPayeTaxBands,

@@ -5,16 +5,16 @@ const {
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const attendanceRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACHER');
+const attendanceRoles = requirePermission('attendance', 'CONTRIBUTE');
 // Whole-school, cross-class reporting — oversight-only, same restriction as
 // assessment/routes.js#analyticsRoles.
-const analyticsRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const analyticsRoles = requirePermission('attendance', 'MANAGE');
 
 router.get('/attendance/my-classes', attendanceRoles, controller.getMyClasses);
 router.get('/attendance/register', attendanceRoles, validateRegisterQuery, controller.getRegister);

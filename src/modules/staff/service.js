@@ -31,10 +31,22 @@ async function createStaffMember(schoolId, data) {
   return tenantScoped(Staff, schoolId).create(normalizeStaffType(data));
 }
 
-async function updateStaffMember(schoolId, staffId, data) {
+// Explicit field whitelist, not a raw `.update(req.body)` — schoolId/userId/
+// status/separation* are owned by tenantScoped's own schoolId enforcement
+// and by the dedicated createStaffLogin/linkStaffToExistingUser/
+// separateStaffMember/reactivateStaffMember workflows respectively; letting
+// this endpoint set them directly would let a caller reassign a staff row
+// to another school or user, or silently flip separation state.
+async function updateStaffMember(schoolId, staffId, {
+  fullName, phone, email, gender, dateOfBirth, dateHired, position, staffType, qualification,
+  bankName, bankBranch, bankAccountNumber, bankAccountName, ssnitNumber, ghanaCardNumber,
+}) {
   const staff = await tenantScoped(Staff, schoolId).findByPk(staffId);
   if (!staff) throw new ApiError(404, 'Staff member not found');
-  await staff.update(normalizeStaffType(data));
+  await staff.update(normalizeStaffType({
+    fullName, phone, email, gender, dateOfBirth, dateHired, position, staffType, qualification,
+    bankName, bankBranch, bankAccountNumber, bankAccountName, ssnitNumber, ghanaCardNumber,
+  }));
   return staff;
 }
 

@@ -6,6 +6,7 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
@@ -13,7 +14,8 @@ router.use(authenticate, requireTenant);
 
 // Admin/Head Teacher only, for every operation — this module has no
 // broader-role view like staff duties do.
-const adminOrHeadTeacher = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const adminOrHeadTeacher = requirePermission('incidents', 'CONTRIBUTE');
+// Deleting an incident stays SCHOOL_ADMIN-only, not part of the editable matrix.
 const adminOnly = requireRole('SCHOOL_ADMIN');
 
 router.get('/incidents/analytics', adminOrHeadTeacher, controller.getIncidentAnalytics);

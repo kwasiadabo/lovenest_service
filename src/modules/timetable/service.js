@@ -72,15 +72,21 @@ function dayLabel(dayOfWeek) {
 // Replaces a class's entire weekly grid in one call — simpler and less
 // error-prone than diffing cell-by-cell, since a grid edit routinely touches
 // several cells at once. `entries` with no subjectId are just omitted (an
-// empty cell has no row). staffId is resolved from SubjectTeacher (the
-// existing "who teaches what in this class" record) rather than accepted
-// from the client, and a teacher already booked into another class at the
-// same day+period blocks the whole save before anything is written.
+// empty cell has no row). staffId defaults to whatever SubjectTeacher says
+// for that class+subject, but the client may override it to any of the
+// class's own class teachers instead (e.g. a class teacher personally
+// covering a period) — anyone else is rejected. A teacher already booked
+// into another class at the same day+period blocks the whole save before
+// anything is written.
 async function saveClassTimetable(schoolId, classId, entries) {
   const klass = await tenantScoped(Class, schoolId).findByPk(classId);
   if (!klass) throw new ApiError(404, 'Class not found');
 
   const toSave = entries.filter((e) => e.subjectId);
+
+  const classTeacherIds = new Set(
+    (await tenantScoped(ClassTeacher, schoolId).findAll({ where: { classId } })).map((ct) => ct.staffId),
+  );
 
   const resolved = [];
   for (const entry of toSave) {
@@ -91,11 +97,20 @@ async function saveClassTimetable(schoolId, classId, entries) {
     if (!subjectTeacher) {
       throw new ApiError(400, 'One of the selected subjects has no teacher assigned to this class yet — set it up in Teacher Assignments first.');
     }
+
+    let { staffId } = subjectTeacher;
+    if (entry.staffId && entry.staffId !== staffId) {
+      if (!classTeacherIds.has(entry.staffId)) {
+        throw new ApiError(400, 'A slot\'s teacher must be either that subject\'s assigned teacher or one of this class\'s class teachers.');
+      }
+      staffId = entry.staffId;
+    }
+
     resolved.push({
       dayOfWeek: entry.dayOfWeek,
       periodId: entry.periodId,
       subjectId: entry.subjectId,
-      staffId: subjectTeacher.staffId,
+      staffId,
     });
   }
 

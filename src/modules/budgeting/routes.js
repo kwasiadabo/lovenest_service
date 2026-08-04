@@ -4,13 +4,15 @@ const { validateBudget } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
-const writeRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const readRoles = requirePermission('budgeting', 'VIEW');
+const writeRoles = requirePermission('budgeting', 'CONTRIBUTE');
+// Budget approval stays SCHOOL_ADMIN-only, not part of the editable matrix.
 const approveRoles = requireRole('SCHOOL_ADMIN');
 
 router.get('/budgets', readRoles, controller.listBudgets);

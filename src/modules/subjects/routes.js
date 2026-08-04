@@ -3,13 +3,13 @@ const controller = require('./controller');
 const { validateSubject } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('subjects', 'MANAGE');
 
 router.get('/subjects', controller.listSubjects);
 router.post('/subjects', adminOnly, validateSubject, controller.createSubject);

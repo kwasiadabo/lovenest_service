@@ -15,25 +15,25 @@ const {
 const { uploadStudentPhoto } = require('../../middleware/studentPhoto');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('students', 'MANAGE');
 // Parent-login provisioning is an administrative action (mirrors how staff
 // accounts are created), not a classroom one — deliberately excludes plain
 // TEACHER, unlike some other assessment-adjacent actions in this app.
-const adminOrHeadTeacher = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const adminOrHeadTeacher = requirePermission('students', 'CONTRIBUTE');
 // Birthday nudges are a class-teacher responsibility (mirrors attendance's
 // ClassTeacher scoping), not admin-only like the rest of this router.
-const teacherOrAbove = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACHER');
+const teacherOrAbove = requirePermission('students', 'VIEW');
 // Same set as the frontend's BILLING_ROLES, which is who can reach the
 // Student Profile page this full-history view attaches to — finer per-
 // section gating (health/incidents/academics/attendance) happens inside
 // fullHistory.js#sectionAccess, not here.
-const billingRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
+const billingRoles = requirePermission('students', 'VIEW');
 
 router.get('/students', adminOnly, controller.listStudents);
 router.get('/students/upcoming-birthdays', teacherOrAbove, controller.getUpcomingBirthdays);

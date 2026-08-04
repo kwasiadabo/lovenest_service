@@ -1,5 +1,5 @@
 const {
-  Parent, StudentParent, Student, AcademicYear, StudentClassAssignment, Class,
+  Parent, StudentParent, Student, AcademicYear, StudentClassAssignment, Class, Level,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
@@ -7,6 +7,7 @@ const reportCardsService = require('../reportCards/service');
 const financialsService = require('../financials/service');
 const leviesService = require('../levies/service');
 const attendanceService = require('../attendance/service');
+const activitiesService = require('../activities/service');
 const announcementsService = require('../announcements/service');
 const newslettersService = require('../newsletters/service');
 const issuesService = require('../issues/service');
@@ -46,7 +47,7 @@ async function getChildren(schoolId, userId) {
   const assignments = currentYear
     ? await tenantScoped(StudentClassAssignment, schoolId).findAll({
       where: { academicYearId: currentYear.id, studentId: students.map((s) => s.id) },
-      include: [Class],
+      include: [{ model: Class, include: [Level] }],
     })
     : [];
   const classByStudentId = new Map(assignments.map((a) => [a.studentId, a.Class]));
@@ -69,6 +70,10 @@ async function getChildren(schoolId, userId) {
       admissionDate: s.admissionDate,
       status: s.status,
       className: classByStudentId.get(s.id)?.name || null,
+      // Nursery/KG only — used by the frontend to show the "Daily
+      // Activities" (creche) link exclusively for pre-school children, same
+      // category check as activities/service.js's EARLY_YEARS_CATEGORIES.
+      levelCategory: classByStudentId.get(s.id)?.Level?.category || null,
       balancePesewas: ledger?.balancePesewas ?? 0,
       lastPaymentDate: lastPayment?.paidDate || null,
       lastPaymentAmountPesewas: lastPayment?.amountPesewas ?? null,
@@ -106,6 +111,14 @@ async function getFinancialStatement(schoolId, userId, studentId, { from, to } =
 async function getAttendance(schoolId, userId, studentId, termId) {
   await assertParentOwnsStudent(schoolId, userId, studentId);
   return attendanceService.getStudentAttendanceReport(schoolId, studentId, termId);
+}
+
+// Daily creche log entries for this child within a term — distinct from
+// getReportCard's termly activity ratings, which stay confirm/lock-based
+// and only surface at term-end.
+async function getDailyActivities(schoolId, userId, studentId, termId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+  return activitiesService.getStudentDailyLog(schoolId, { studentId, termId });
 }
 
 async function getAnnouncements(schoolId) {
@@ -189,6 +202,7 @@ module.exports = {
   getStudentLevies,
   getFinancialStatement,
   getAttendance,
+  getDailyActivities,
   getAnnouncements,
   getNewsletters,
   createIssue,

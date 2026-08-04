@@ -46,7 +46,11 @@ async function listFeeAmounts(schoolId, { academicYearId, termId, levelId, feeTy
 // category is termly — the fee type's category decides which applies, so
 // any termId the client sends for an ADMISSION item is ignored rather than
 // trusted. classId is an optional override on top of the level's default;
-// unset it (null) to mean "level default" rather than "no data".
+// unset it (null) to mean "level default" rather than "no data". A class
+// billed MONTHLY (Class.feeBillingCycle, always a per-class opt-in — see
+// models/class.js) is a third termless case alongside ADMISSION, but only
+// when classId points at that specific class — there's no such thing as a
+// level-wide monthly default, since MONTHLY is never level-wide.
 async function setFeeAmount(schoolId, {
   academicYearId, termId, levelId, classId, feeTypeId, amountPesewas,
 }) {
@@ -59,8 +63,20 @@ async function setFeeAmount(schoolId, {
   const level = await tenantScoped(Level, schoolId).findByPk(levelId);
   if (!level) throw new ApiError(404, 'Level not found');
 
+  let effectiveClassId = null;
+  let klass = null;
+  if (classId) {
+    klass = await tenantScoped(Class, schoolId).findByPk(classId);
+    if (!klass) throw new ApiError(404, 'Class not found');
+    if (klass.levelId !== levelId) {
+      throw new ApiError(400, 'That class does not belong to the selected level');
+    }
+    effectiveClassId = classId;
+  }
+
   let effectiveTermId = null;
-  if (feeType.category !== 'ADMISSION') {
+  const isTermless = feeType.category === 'ADMISSION' || klass?.feeBillingCycle === 'MONTHLY';
+  if (!isTermless) {
     if (!termId) throw new ApiError(400, 'termId is required for this fee category');
     const term = await tenantScoped(Term, schoolId).findByPk(termId);
     if (!term) throw new ApiError(404, 'Term not found');
@@ -68,16 +84,6 @@ async function setFeeAmount(schoolId, {
       throw new ApiError(400, 'That term does not belong to the selected academic year');
     }
     effectiveTermId = termId;
-  }
-
-  let effectiveClassId = null;
-  if (classId) {
-    const klass = await tenantScoped(Class, schoolId).findByPk(classId);
-    if (!klass) throw new ApiError(404, 'Class not found');
-    if (klass.levelId !== levelId) {
-      throw new ApiError(400, 'That class does not belong to the selected level');
-    }
-    effectiveClassId = classId;
   }
 
   const existing = await tenantScoped(FeeAmount, schoolId).findOne({

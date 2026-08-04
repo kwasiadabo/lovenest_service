@@ -3,13 +3,14 @@ const controller = require('./controller');
 const { validateMessageBody, validateStatus } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const manageRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+// Same moduleKey as messaging/announcements/newsletters — see announcements/routes.js.
+const manageRoles = requirePermission('communications', 'MANAGE');
 
 router.get('/issues', manageRoles, controller.list);
 router.get('/issues/:id', manageRoles, controller.get);

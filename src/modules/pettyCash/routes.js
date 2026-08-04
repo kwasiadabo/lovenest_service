@@ -6,6 +6,7 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
@@ -13,9 +14,10 @@ router.use(authenticate, requireTenant);
 
 // Mirrors accounting/routes.js's tiering: viewing is open to the usual
 // finance roles, but setting up the fund/voiding a voucher/replenishing —
-// anything that touches a real cash account balance — is SCHOOL_ADMIN only.
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
-const custodianRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'ADMINISTRATOR');
+// anything that touches a real cash account balance — is SCHOOL_ADMIN only,
+// not part of the editable matrix.
+const readRoles = requirePermission('pettyCash', 'VIEW');
+const custodianRoles = requirePermission('pettyCash', 'CONTRIBUTE');
 const adminOnly = requireRole('SCHOOL_ADMIN');
 
 router.get('/petty-cash/fund', readRoles, controller.getFund);

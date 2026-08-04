@@ -6,8 +6,10 @@ async function listSubjects(schoolId) {
   return tenantScoped(Subject, schoolId).findAll({ order: [['name', 'ASC']] });
 }
 
-async function createSubject(schoolId, { name, code }) {
-  return tenantScoped(Subject, schoolId).create({ name, code });
+async function createSubject(schoolId, {
+  name, code, color,
+}) {
+  return tenantScoped(Subject, schoolId).create({ name, code, color });
 }
 
 async function updateSubject(schoolId, subjectId, data) {

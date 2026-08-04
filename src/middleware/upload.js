@@ -17,4 +17,17 @@ const uploadLogo = multer({
   },
 }).single('logo');
 
-module.exports = { uploadLogo };
+// Same constraints as uploadLogo — reused for the headteacher signature
+// image (see schoolSettings module), just a different form field name.
+const uploadSignature = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_LOGO_BYTES },
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      return cb(new ApiError(400, 'Signature must be a PNG, JPEG, WebP, or SVG image'));
+    }
+    return cb(null, true);
+  },
+}).single('signature');
+
+module.exports = { uploadLogo, uploadSignature };

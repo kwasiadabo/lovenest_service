@@ -6,16 +6,19 @@ const {
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const assessmentRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACHER');
+const assessmentRoles = requirePermission('assessment', 'CONTRIBUTE');
+// Reopening confirmed exam scores stays SCHOOL_ADMIN-only, not part of the
+// editable matrix.
 const schoolAdminOnly = requireRole('SCHOOL_ADMIN');
 // Whole-school, cross-class reporting — not the per-class/subject scope a
 // plain TEACHER is otherwise restricted to, so this is oversight-only.
-const analyticsRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const analyticsRoles = requirePermission('assessment', 'MANAGE');
 
 router.get('/assessment/my-assignments', assessmentRoles, controller.getMyAssignments);
 

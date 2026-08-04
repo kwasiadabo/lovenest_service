@@ -3,13 +3,15 @@ const controller = require('./controller');
 const { validateWeightsUpdate, validateGradeBandsUpdate, validateClassworkSourceUpdate } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const schoolAdminOnly = requireRole('SCHOOL_ADMIN');
+// Same moduleKey as academic/routes.js — grading configuration is an
+// academic-setup concern in the access matrix, not its own module.
+const schoolAdminOnly = requirePermission('academicSetup', 'MANAGE');
 
 router.get('/grading-settings', controller.getGradingSettings);
 router.put('/grading-settings/weights', schoolAdminOnly, validateWeightsUpdate, controller.updateWeights);

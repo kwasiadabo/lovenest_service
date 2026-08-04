@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const {
   sequelize, Vehicle, Staff, Student, StudentTransport, Route, PickupPoint, School, PickupRecord,
   DropoffRecord, TransportInvoice, TransportPayment, TransportPaymentRevision, Term, AcademicYear,
-  CashAccount, User, VehicleTrip,
+  CashAccount, User, VehicleTrip, StudentClassAssignment, Class,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
@@ -27,6 +27,22 @@ function displayName(user) {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
+}
+
+// Shared by getPickupRecord/getDropoffRecord below — the current academic
+// year's class assignment per student, same lookup convention as
+// parentPortal/service.js#getChildren. A student with no assignment (or no
+// current year set) just gets a null className rather than failing the
+// whole roster read.
+async function resolveClassNamesByStudentId(schoolId, studentIds) {
+  if (studentIds.length === 0) return new Map();
+  const currentYear = await tenantScoped(AcademicYear, schoolId).findOne({ where: { isCurrent: true } });
+  if (!currentYear) return new Map();
+  const assignments = await tenantScoped(StudentClassAssignment, schoolId).findAll({
+    where: { academicYearId: currentYear.id, studentId: studentIds },
+    include: [Class],
+  });
+  return new Map(assignments.map((a) => [a.studentId, a.Class?.name || null]));
 }
 
 // ---- Vehicles (setup) ----
@@ -449,12 +465,15 @@ async function getPickupRecord(schoolId, { vehicleId, date }) {
   const statuses = {};
   for (const record of records) statuses[record.studentId] = record.status;
 
+  const classNameByStudentId = await resolveClassNamesByStudentId(schoolId, roster.map((r) => r.studentId));
+
   return {
     vehicle,
     students: roster.map((r) => ({
       id: r.studentId,
       fullName: r.Student.fullName,
       studentNumber: r.Student.studentNumber,
+      className: classNameByStudentId.get(r.studentId) || null,
       pickupPoint: r.PickupPoint ? { name: r.PickupPoint.name, scheduledTime: r.PickupPoint.scheduledTime } : null,
     })),
     statuses,
@@ -552,12 +571,15 @@ async function getDropoffRecord(schoolId, { vehicleId, date }) {
     };
   }
 
+  const classNameByStudentId = await resolveClassNamesByStudentId(schoolId, roster.map((r) => r.studentId));
+
   return {
     vehicle,
     students: roster.map((r) => ({
       id: r.studentId,
       fullName: r.Student.fullName,
       studentNumber: r.Student.studentNumber,
+      className: classNameByStudentId.get(r.studentId) || null,
       // Biodata useful for a staff member confirming they have the right
       // child in front of them before recording — pickup point isn't
       // necessarily where they're dropped, but it's the best "does this

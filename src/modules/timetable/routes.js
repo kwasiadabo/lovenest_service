@@ -3,14 +3,14 @@ const controller = require('./controller');
 const { validatePeriod, validateTimetableQuery, validateTimetableSave } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
-const timetableRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+const adminOnly = requirePermission('timetable', 'MANAGE');
+const timetableRoles = requirePermission('timetable', 'CONTRIBUTE');
 
 router.get('/timetable-periods', adminOnly, controller.listPeriods);
 router.post('/timetable-periods', adminOnly, validatePeriod, controller.createPeriod);

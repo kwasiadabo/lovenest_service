@@ -307,8 +307,8 @@ async function applySuccessfulPayment(payment) {
   return payment;
 }
 
-async function verifyPayment(reference) {
-  const payment = await Payment.findOne({ where: { reference } });
+async function verifyPayment(schoolId, reference) {
+  const payment = await Payment.findOne({ where: { reference, schoolId } });
   if (!payment) {
     throw new ApiError(404, 'Payment not found');
   }

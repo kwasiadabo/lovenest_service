@@ -9,6 +9,7 @@ const ApiError = require('../../utils/ApiError');
 const assertNotSelfReversal = require('../../utils/assertNotSelfReversal');
 const { notifyPaymentReceipt } = require('./notify');
 const messagingService = require('../messaging/service');
+const notificationsService = require('../notifications/service');
 const { postJournalEntry, reverseEntryFor } = require('../accounting/ledgerPoster');
 const { FEE_CATEGORY_ACCOUNT_CODES } = require('../../utils/defaultChartOfAccounts');
 const transportService = require('../transport/service');
@@ -185,6 +186,77 @@ async function syncStudentDiscount(schoolId, school, bill, student) {
   await upsertDiscountItem(schoolId, bill.id, 'DISCOUNT', siblingDiscountPesewas);
 }
 
+// ---- Bill period resolution ----
+// Mirrors transport/service.js#resolveInvoicePeriod: TERMLY takes its period
+// straight from the Term; MONTHLY (a per-class opt-in — see
+// models/class.js#feeBillingCycle) has no Term at all, so its academic year
+// is resolved from the due date against each academic year's own range.
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+async function resolveAcademicYearForDate(schoolId, dateStr) {
+  return tenantScoped(AcademicYear, schoolId).findOne({
+    where: { startDate: { [Op.lte]: dateStr }, endDate: { [Op.gte]: dateStr } },
+  });
+}
+
+async function resolveBillPeriod(schoolId, {
+  billingCycle, academicYearId, termId, month, year: monthlyYear,
+}) {
+  if (billingCycle === 'MONTHLY') {
+    const monthNum = Number(month);
+    const yearNum = Number(monthlyYear);
+    if (!monthNum || monthNum < 1 || monthNum > 12) {
+      throw new ApiError(400, 'month is required and must be 1-12 for monthly billing');
+    }
+    if (!yearNum) throw new ApiError(400, 'year is required for monthly billing');
+    const dueDate = `${yearNum}-${pad2(monthNum)}-01`;
+    const academicYear = await resolveAcademicYearForDate(schoolId, dueDate);
+    if (!academicYear) {
+      throw new ApiError(400, 'No academic year covers that month — set one up under Academic Years first');
+    }
+    return {
+      billingCycle: 'MONTHLY',
+      periodKey: `${yearNum}-${pad2(monthNum)}`,
+      periodLabel: `${MONTH_NAMES[monthNum - 1]} ${yearNum}`,
+      dueDate,
+      termId: null,
+      academicYearId: academicYear.id,
+      periodMonth: monthNum,
+      periodYear: yearNum,
+    };
+  }
+
+  if (!academicYearId) throw new ApiError(400, 'academicYearId is required for termly billing');
+  const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
+  if (!year) throw new ApiError(404, 'Academic year not found');
+
+  if (!termId) throw new ApiError(400, 'termId is required for termly billing');
+  const term = await tenantScoped(Term, schoolId).findByPk(termId);
+  if (!term) throw new ApiError(404, 'Term not found');
+  if (term.academicYearId !== academicYearId) {
+    throw new ApiError(400, 'That term does not belong to the selected academic year');
+  }
+
+  return {
+    billingCycle: 'TERMLY',
+    periodKey: term.id,
+    periodLabel: `${term.name} (${year.name})`,
+    dueDate: term.startDate,
+    termId: term.id,
+    academicYearId: term.academicYearId,
+    periodMonth: null,
+    periodYear: null,
+  };
+}
+
 // targetIds is always an array — Sequelize turns an array value into an
 // IN (...) clause, so this naturally supports selecting several levels or
 // classes at once, not just one.
@@ -204,16 +276,11 @@ async function resolveTargetAssignments(schoolId, { academicYearId, targetType, 
 // ---- Bills ----
 
 async function generateBills(schoolId, userId, {
-  academicYearId, termId, targetType, targetIds, feeTypeIds,
+  billingCycle = 'TERMLY', academicYearId, termId, month, year, targetType, targetIds, feeTypeIds,
 }) {
-  const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
-  if (!year) throw new ApiError(404, 'Academic year not found');
-
-  const term = await tenantScoped(Term, schoolId).findByPk(termId);
-  if (!term) throw new ApiError(404, 'Term not found');
-  if (term.academicYearId !== academicYearId) {
-    throw new ApiError(400, 'That term does not belong to the selected academic year');
-  }
+  const period = await resolveBillPeriod(schoolId, {
+    billingCycle, academicYearId, termId, month, year,
+  });
 
   const feeTypes = await tenantScoped(FeeType, schoolId).findAll({ where: { id: feeTypeIds } });
   if (feeTypes.length !== feeTypeIds.length) throw new ApiError(404, 'One or more fee items not found');
@@ -221,19 +288,30 @@ async function generateBills(schoolId, userId, {
     throw new ApiError(400, 'Admission fees cannot be billed through this feature — use the Admission wizard instead');
   }
 
-  const assignments = await resolveTargetAssignments(schoolId, { academicYearId, targetType, targetIds });
+  const assignments = await resolveTargetAssignments(
+    schoolId, { academicYearId: period.academicYearId, targetType, targetIds },
+  );
   const school = await School.findByPk(schoolId);
 
   let billsCreated = 0;
   let billsUpdated = 0;
   let billsSkipped = 0;
   let studentsWithNoAmount = 0;
+  let studentsSkippedWrongCycle = 0;
 
   for (const assignment of assignments) {
     const { studentId, classId } = assignment;
     const levelId = assignment.Class.levelId;
 
-    let bill = await tenantScoped(Bill, schoolId).findOne({ where: { studentId, termId } });
+    // A class only ever appears in one billing run — TERMLY runs never touch
+    // a MONTHLY-opted-in class (typically pre-school) and vice versa (see
+    // models/class.js#feeBillingCycle).
+    if (assignment.Class.feeBillingCycle !== period.billingCycle) {
+      studentsSkippedWrongCycle += 1;
+      continue;
+    }
+
+    let bill = await tenantScoped(Bill, schoolId).findOne({ where: { studentId, periodKey: period.periodKey } });
     if (bill && bill.status === 'CONFIRMED') {
       billsSkipped += 1;
       continue;
@@ -242,14 +320,24 @@ async function generateBills(schoolId, userId, {
     const isNewBill = !bill;
     if (!bill) {
       bill = await tenantScoped(Bill, schoolId).create({
-        studentId, academicYearId, termId, status: 'PROVISIONAL', totalPesewas: 0,
+        studentId,
+        academicYearId: period.academicYearId,
+        termId: period.termId,
+        billingCycle: period.billingCycle,
+        periodMonth: period.periodMonth,
+        periodYear: period.periodYear,
+        periodKey: period.periodKey,
+        periodLabel: period.periodLabel,
+        dueDate: period.dueDate,
+        status: 'PROVISIONAL',
+        totalPesewas: 0,
       });
     }
 
     let anyAmount = false;
     for (const feeType of feeTypes) {
       const amountPesewas = await resolveAmount(schoolId, {
-        academicYearId, termId, levelId, classId, feeTypeId: feeType.id,
+        academicYearId: period.academicYearId, termId: period.termId, levelId, classId, feeTypeId: feeType.id,
       });
       if (amountPesewas === undefined) continue;
       anyAmount = true;
@@ -277,7 +365,11 @@ async function generateBills(schoolId, userId, {
     await syncStudentDiscount(schoolId, school, bill, assignment.Student);
 
     // Carry forward any outstanding balance from prior confirmed bills as an
-    // arrears line, so it's collected alongside this term's fees.
+    // arrears line, so it's collected alongside this period's fees. Lifetime-
+    // scoped (computeStudentBalancePesewas doesn't filter by term/period),
+    // which is exactly what makes this work unmodified for MONTHLY bills too
+    // — last month's unpaid balance shows up here the same way last term's
+    // would.
     const arrearsPesewas = Math.max(0, await computeStudentBalancePesewas(schoolId, studentId));
     const existingArrearsItem = await tenantScoped(BillItem, schoolId).findOne({
       where: { billId: bill.id, source: 'ARREARS' },
@@ -308,25 +400,135 @@ async function generateBills(schoolId, userId, {
   // generateTransportInvoices is idempotent (skips periods already
   // invoiced), and never allowed to fail the tuition bill run that already
   // succeeded — same best-effort-sibling-operation shape as a notification
-  // send elsewhere in this file.
+  // send elsewhere in this file. Monthly tuition runs skip this — transport
+  // has its own independent MONTHLY cycle, triggered from its own Billing
+  // page, not tied to a tuition period.
   let transport = null;
-  try {
-    transport = await transportService.generateTransportInvoices(schoolId, userId, { billingCycle: 'TERMLY', termId });
-  } catch (err) {
-    transport = { error: err.message };
+  if (period.billingCycle === 'TERMLY') {
+    try {
+      transport = await transportService.generateTransportInvoices(
+        schoolId, userId, { billingCycle: 'TERMLY', termId: period.termId },
+      );
+    } catch (err) {
+      transport = { error: err.message };
+    }
   }
 
   return {
-    billsCreated, billsUpdated, billsSkipped, studentsWithNoAmount, transport,
+    billsCreated, billsUpdated, billsSkipped, studentsWithNoAmount, studentsSkippedWrongCycle, transport,
+  };
+}
+
+// Dry run of generateBills — same target/period resolution and the same
+// per-student amount estimate (standard fees, sibling/individual discount,
+// lifetime arrears), but nothing is written. Lets an admin (or the monthly
+// scheduler's own sanity check) see who's about to be billed before
+// committing. Mirrors transport/service.js#previewTransportInvoices.
+async function previewBillGeneration(schoolId, {
+  billingCycle = 'TERMLY', academicYearId, termId, month, year, targetType, targetIds, feeTypeIds,
+}) {
+  const period = await resolveBillPeriod(schoolId, {
+    billingCycle, academicYearId, termId, month, year,
+  });
+
+  const feeTypes = await tenantScoped(FeeType, schoolId).findAll({ where: { id: feeTypeIds } });
+  if (feeTypes.length !== feeTypeIds.length) throw new ApiError(404, 'One or more fee items not found');
+  if (feeTypes.some((ft) => ft.category === 'ADMISSION')) {
+    throw new ApiError(400, 'Admission fees cannot be billed through this feature — use the Admission wizard instead');
+  }
+
+  const assignments = await resolveTargetAssignments(
+    schoolId, { academicYearId: period.academicYearId, targetType, targetIds },
+  );
+  const school = await School.findByPk(schoolId);
+
+  const students = [];
+  for (const assignment of assignments) {
+    const { studentId, classId } = assignment;
+    const levelId = assignment.Class.levelId;
+
+    if (assignment.Class.feeBillingCycle !== period.billingCycle) {
+      students.push({
+        studentId, studentName: assignment.Student?.fullName || null, status: 'WRONG_CYCLE', amountPesewas: null,
+      });
+      continue;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const existingBill = await tenantScoped(Bill, schoolId).findOne({
+      where: { studentId, periodKey: period.periodKey },
+    });
+    if (existingBill && existingBill.status === 'CONFIRMED') {
+      students.push({
+        studentId, studentName: assignment.Student?.fullName || null, status: 'ALREADY_CONFIRMED', amountPesewas: existingBill.totalPesewas,
+      });
+      continue;
+    }
+
+    let standardPesewas = 0;
+    let termFeesPesewas = 0;
+    let anyAmount = false;
+    for (const feeType of feeTypes) {
+      // eslint-disable-next-line no-await-in-loop
+      const amountPesewas = await resolveAmount(schoolId, {
+        academicYearId: period.academicYearId, termId: period.termId, levelId, classId, feeTypeId: feeType.id,
+      });
+      if (amountPesewas === undefined) continue;
+      anyAmount = true;
+      standardPesewas += amountPesewas;
+      if (feeType.category === 'TERM') termFeesPesewas += amountPesewas;
+    }
+
+    if (!anyAmount) {
+      students.push({
+        studentId, studentName: assignment.Student?.fullName || null, status: 'NO_AMOUNT', amountPesewas: null,
+      });
+      continue;
+    }
+
+    const hasIndividualDiscount = !!assignment.Student.individualDiscountType;
+    const individualDiscountPesewas = hasIndividualDiscount
+      ? resolveIndividualDiscountPesewas(termFeesPesewas, assignment.Student)
+      : 0;
+    // eslint-disable-next-line no-await-in-loop
+    const siblingDiscountPercent = hasIndividualDiscount ? 0 : await resolveSiblingDiscountPercent(schoolId, school, studentId);
+    const siblingDiscountPesewas = siblingDiscountPercent > 0
+      ? Math.round(termFeesPesewas * (siblingDiscountPercent / 100))
+      : 0;
+
+    // eslint-disable-next-line no-await-in-loop
+    const arrearsPesewas = Math.max(0, await computeStudentBalancePesewas(schoolId, studentId));
+    const estimatedTotalPesewas = standardPesewas - individualDiscountPesewas - siblingDiscountPesewas + arrearsPesewas;
+
+    students.push({
+      studentId,
+      studentName: assignment.Student?.fullName || null,
+      status: 'PENDING',
+      amountPesewas: estimatedTotalPesewas,
+      arrearsPesewas,
+    });
+  }
+
+  return {
+    periodLabel: period.periodLabel,
+    dueDate: period.dueDate,
+    students,
+    toBillCount: students.filter((s) => s.status === 'PENDING').length,
+    alreadyConfirmedCount: students.filter((s) => s.status === 'ALREADY_CONFIRMED').length,
+    noAmountCount: students.filter((s) => s.status === 'NO_AMOUNT').length,
+    wrongCycleCount: students.filter((s) => s.status === 'WRONG_CYCLE').length,
   };
 }
 
 async function listBills(schoolId, {
-  academicYearId, termId, status, levelId, classId, studentId,
+  academicYearId, termId, billingCycle, periodMonth, periodYear, status, levelId, classId, studentId,
 } = {}) {
   const where = {};
   if (academicYearId) where.academicYearId = academicYearId;
   if (termId) where.termId = termId;
+  if (billingCycle) where.billingCycle = billingCycle;
+  if (periodMonth) where.periodMonth = periodMonth;
+  if (periodYear) where.periodYear = periodYear;
   if (status) where.status = status;
   if (studentId) where.studentId = studentId;
 
@@ -445,7 +647,7 @@ async function postBillConfirmation(schoolId, bill, userId, transaction) {
 }
 
 async function confirmBill(schoolId, billId, userId) {
-  return sequelize.transaction(async (transaction) => {
+  const result = await sequelize.transaction(async (transaction) => {
     const bill = await tenantScoped(Bill, schoolId).findByPk(billId, { transaction });
     if (!bill) throw new ApiError(404, 'Bill not found');
     if (bill.status === 'CONFIRMED') return { bill, alreadyConfirmed: true };
@@ -459,6 +661,20 @@ async function confirmBill(schoolId, billId, userId) {
 
     return { bill, alreadyConfirmed: false };
   });
+
+  // Notify only on an actual confirmation, once the transaction has
+  // committed — matches reportCards/service.js#publishReportCard's own
+  // notifyParentsOfStudent call for the equivalent "just happened" event.
+  if (!result.alreadyConfirmed) {
+    await notificationsService.notifyParentsOfStudent(schoolId, result.bill.studentId, {
+      type: 'BILL_CONFIRMED',
+      title: 'Bill confirmed',
+      body: 'Your child\'s bill for this term has been confirmed and is ready to view.',
+      linkUrl: `/parent/children/${result.bill.studentId}/bills`,
+    });
+  }
+
+  return result;
 }
 
 async function confirmBills(schoolId, billIds, userId) {
@@ -1356,6 +1572,7 @@ async function sendDebtReminders(schoolId, userId, { studentIds, messageTemplate
 
 module.exports = {
   generateBills,
+  previewBillGeneration,
   listBills,
   addSpecialItem,
   removeBillItem,

@@ -3,13 +3,15 @@ const controller = require('./controller');
 const { validateComposeSend } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const messagingRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER');
+// Same moduleKey as announcements/newsletters/issues — the frontend nav
+// groups all four under one "Messaging" section, so the matrix does too.
+const messagingRoles = requirePermission('communications', 'MANAGE');
 
 router.get('/messaging/recipients/parents', messagingRoles, controller.previewParentRecipients);
 router.get('/messaging/recipients/teachers', messagingRoles, controller.previewTeacherRecipients);

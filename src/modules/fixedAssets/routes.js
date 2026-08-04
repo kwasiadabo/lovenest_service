@@ -3,14 +3,14 @@ const controller = require('./controller');
 const { validateCreateFixedAsset, validateDepreciationRun, validateDisposal } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const readRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
-const writeRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const readRoles = requirePermission('fixedAssets', 'VIEW');
+const writeRoles = requirePermission('fixedAssets', 'MANAGE');
 
 router.get('/fixed-assets', readRoles, controller.listFixedAssets);
 router.post('/fixed-assets', writeRoles, validateCreateFixedAsset, controller.createFixedAsset);

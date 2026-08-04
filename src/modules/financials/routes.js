@@ -1,25 +1,28 @@
 const express = require('express');
 const controller = require('./controller');
 const {
-  validateGenerateBills, validateSpecialItem, validatePayment, validatePaymentUpdate, validateConfirmBatch,
-  validateSendReminders,
+  validateGenerateBills, validatePreviewBills, validateSpecialItem, validatePayment, validatePaymentUpdate,
+  validateConfirmBatch, validateSendReminders,
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const billingRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT', 'HEAD_TEACHER');
+const billingRoles = requirePermission('billing', 'CONTRIBUTE');
 // Reversing an already-posted payment is a narrower privilege than the
 // billingRoles actions above — same role set as transport/levies' reversal
 // routes. assertNotSelfReversal (service layer) additionally blocks
 // whoever recorded the payment from being the one to reverse it.
-const reversalRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const reversalRoles = requirePermission('billing', 'MANAGE');
 
 router.post('/bills/generate', billingRoles, validateGenerateBills, controller.generateBills);
+// A dry run of the same payload as /bills/generate — POST (not GET) because
+// targetIds/feeTypeIds are arrays, same reasoning as generate itself.
+router.post('/bills/preview', billingRoles, validatePreviewBills, controller.previewBillGeneration);
 router.get('/bills/analytics', billingRoles, controller.getBillAnalytics);
 router.get('/bills', billingRoles, controller.listBills);
 router.post('/bills/confirm-batch', billingRoles, validateConfirmBatch, controller.confirmBills);

@@ -16,6 +16,7 @@ function validateDiscountPercent(value, fieldName) {
 function validateUpdateSettings(req, res, next) {
   const {
     smsSenderId, emailUser, emailAppPassword, thirdChildDiscountPercent, fourthChildAndAboveDiscountPercent,
+    paymentInstructions,
   } = req.body || {};
 
   if (smsSenderId !== undefined && smsSenderId !== '' && typeof smsSenderId === 'string') {
@@ -43,6 +44,15 @@ function validateUpdateSettings(req, res, next) {
 
   const fourthChildError = validateDiscountPercent(fourthChildAndAboveDiscountPercent, 'fourthChildAndAboveDiscountPercent');
   if (fourthChildError) return next(new ApiError(400, fourthChildError));
+
+  if (paymentInstructions !== undefined) {
+    if (typeof paymentInstructions !== 'string') {
+      return next(new ApiError(400, 'paymentInstructions must be a string'));
+    }
+    if (paymentInstructions.trim().length > 1000) {
+      return next(new ApiError(400, 'paymentInstructions must be 1000 characters or fewer'));
+    }
+  }
 
   return next();
 }

@@ -10,26 +10,29 @@ const {
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
-const { requireRole } = require('../../middleware/roleGuard');
+const { requirePermission } = require('../../middleware/permissionGuard');
 
 const router = express.Router();
 
 router.use(authenticate, requireTenant);
 
-const adminOnly = requireRole('SCHOOL_ADMIN');
+const adminOnly = requirePermission('transportManagement', 'MANAGE');
 // Recording a drop-off happens live, in the field, by whoever's riding the
 // bus that day — not necessarily a SCHOOL_ADMIN. Same role set as
 // attendance's register-taking guard.
-const dropoffRecordingRoles = requireRole('SCHOOL_ADMIN', 'HEAD_TEACHER', 'TEACHER');
-// Reversing an already-posted invoice/payment is a narrower privilege than
-// the adminOnly actions above — same role set as financials/levies'
-// reversal routes. assertNotSelfReversal (service layer) additionally
-// blocks whoever recorded the transaction from being the one to reverse it.
-const reversalRoles = requireRole('SCHOOL_ADMIN', 'ACCOUNTANT');
+const dropoffRecordingRoles = requirePermission('transportManagement', 'VIEW');
+// Reversing an already-posted invoice/payment is a distinct, narrower
+// privilege than the bulk vehicle/route/invoice management above — same
+// role set as financials/levies' reversal routes. assertNotSelfReversal
+// (service layer) additionally blocks whoever recorded the transaction from
+// being the one to reverse it.
+const reversalRoles = requirePermission('transportManagement', 'CONTRIBUTE');
 // Trip control (start/location/end) is the assigned driver only — ownership
 // is re-checked per-request in transport/service.js#assertIsAssignedDriver,
-// this guard just keeps non-drivers out entirely.
-const driverOnly = requireRole('DRIVER');
+// this guard just keeps non-drivers out entirely. Its own module (rather
+// than a level of transportManagement) since it's a completely separate
+// capability, not a "more/less" version of vehicle/route management.
+const driverOnly = requirePermission('driverOperations', 'MANAGE');
 
 router.get('/vehicles', adminOnly, controller.listVehicles);
 router.post('/vehicles', adminOnly, validateVehicle, controller.createVehicle);

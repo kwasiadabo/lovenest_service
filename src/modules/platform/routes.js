@@ -32,6 +32,7 @@ router.get('/analytics/tenant-health', controller.getTenantHealthAnalytics);
 router.get('/analytics/usage', controller.getUsageAnalytics);
 
 router.post('/reminders/run-now', controller.runReminderSweepNow);
+router.post('/monthly-billing/run-now', controller.runMonthlyBillingSweepNow);
 
 router.get('/statutory-settings', controller.getStatutorySettings);
 router.post('/statutory-settings/ssnit-rate', validateSsnitRate, controller.setSsnitRate);
