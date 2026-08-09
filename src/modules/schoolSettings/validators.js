@@ -1,6 +1,9 @@
 const ApiError = require('../../utils/ApiError');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+// Kept in sync with frontend's idCardTemplates/index.js ID_CARD_TEMPLATES.
+const ID_CARD_TEMPLATES = ['classic', 'badge', 'banner', 'crest'];
 
 // Every field here is optional (undefined = leave unchanged) — only format
 // is checked when a field is actually present in the request.
@@ -16,7 +19,7 @@ function validateDiscountPercent(value, fieldName) {
 function validateUpdateSettings(req, res, next) {
   const {
     smsSenderId, emailUser, emailAppPassword, thirdChildDiscountPercent, fourthChildAndAboveDiscountPercent,
-    paymentInstructions,
+    paymentInstructions, brandColor, brandColorSecondary, idCardTemplate,
   } = req.body || {};
 
   if (smsSenderId !== undefined && smsSenderId !== '' && typeof smsSenderId === 'string') {
@@ -52,6 +55,18 @@ function validateUpdateSettings(req, res, next) {
     if (paymentInstructions.trim().length > 1000) {
       return next(new ApiError(400, 'paymentInstructions must be 1000 characters or fewer'));
     }
+  }
+
+  if (brandColor !== undefined && brandColor !== '' && !HEX_COLOR_PATTERN.test(brandColor)) {
+    return next(new ApiError(400, 'brandColor must be a hex color like #2563EB'));
+  }
+
+  if (brandColorSecondary !== undefined && brandColorSecondary !== '' && !HEX_COLOR_PATTERN.test(brandColorSecondary)) {
+    return next(new ApiError(400, 'brandColorSecondary must be a hex color like #2563EB'));
+  }
+
+  if (idCardTemplate !== undefined && !ID_CARD_TEMPLATES.includes(idCardTemplate)) {
+    return next(new ApiError(400, `idCardTemplate must be one of: ${ID_CARD_TEMPLATES.join(', ')}`));
   }
 
   return next();

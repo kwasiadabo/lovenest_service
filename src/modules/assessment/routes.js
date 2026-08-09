@@ -2,6 +2,7 @@ const express = require('express');
 const controller = require('./controller');
 const {
   validateAssessmentItem, validateScoreUpsert, validateExamScoreSave, validateExamScoreScope,
+  validateExamScoreEffortUpdate,
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
@@ -30,6 +31,7 @@ router.put('/assessment/scores/:itemId/:studentId', assessmentRoles, validateSco
 
 router.get('/assessment/exam-grid', assessmentRoles, controller.getExamGrid);
 router.put('/assessment/exam-scores', assessmentRoles, validateExamScoreSave, controller.saveExamScore);
+router.patch('/assessment/exam-scores/effort', assessmentRoles, validateExamScoreEffortUpdate, controller.updateExamScoreEffort);
 router.post('/assessment/exam-scores/confirm', assessmentRoles, validateExamScoreScope, controller.confirmExamScores);
 router.post('/assessment/exam-scores/reopen', schoolAdminOnly, validateExamScoreScope, controller.reopenExamScores);
 

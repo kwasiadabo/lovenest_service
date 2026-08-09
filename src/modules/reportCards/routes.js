@@ -17,6 +17,7 @@ const headteacherOrAdmin = requirePermission('reportCards', 'MANAGE');
 
 router.get('/report-cards/generate', reportCardRoles, validateGenerateQuery, controller.generate);
 router.get('/report-cards/class-summary', reportCardRoles, validateClassSummaryQuery, controller.classSummary);
+router.get('/report-cards/:studentId/:academicYearId/history', reportCardRoles, controller.history);
 router.get('/report-cards/:studentId/:termId/remarks', reportCardRoles, controller.getRemarks);
 router.put('/report-cards/:studentId/:termId/remarks', reportCardRoles, validateRemarksUpdate, controller.updateRemarks);
 router.put(

@@ -81,6 +81,14 @@ const getLiveTransport = wrap(async (req, res) => {
   res.json(await service.getLiveTransport(req.schoolId, req.auth.userId, req.params.studentId));
 });
 
+const initializeFeePayment = wrap(async (req, res) => {
+  res.json(await service.initializeFeePayment(req.schoolId, req.auth.userId, req.params.studentId));
+});
+
+const verifyFeePayment = wrap(async (req, res) => {
+  res.json(await service.verifyFeePayment(req.schoolId, req.auth.userId, req.params.reference));
+});
+
 module.exports = {
   getChildren,
   getReportCard,
@@ -101,4 +109,6 @@ module.exports = {
   getTransport,
   getTransportHistory,
   getLiveTransport,
+  initializeFeePayment,
+  verifyFeePayment,
 };

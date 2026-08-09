@@ -1,4 +1,4 @@
-const DOCUMENT_TYPES = ['CONTRACT', 'ID', 'CERTIFICATE', 'OTHER'];
+const DOCUMENT_TYPES = ['CONTRACT', 'ID', 'CERTIFICATE', 'LICENSE', 'CV', 'COVER_LETTER', 'OTHER'];
 
 module.exports = (sequelize, DataTypes) => {
   const StaffDocument = sequelize.define('StaffDocument', {

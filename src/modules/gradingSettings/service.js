@@ -38,6 +38,12 @@ async function resolveGradingConfig(schoolId) {
     classworkSourceMode: school.classworkSourceMode,
     classworkWeight: Number(school.classworkWeight),
     projectWeight: Number(school.projectWeight),
+    // Both null until a school opts in — see reportCards/service.js's
+    // buildReportCardPayload for how each is gated (passMarkPercent unset =
+    // no subjects-passed/failed line; bestAggregateSubjectCount only ever
+    // applies on top of numeric grade bands, checked separately).
+    passMarkPercent: school.passMarkPercent === null ? null : Number(school.passMarkPercent),
+    bestAggregateSubjectCount: school.bestAggregateSubjectCount === null ? null : Number(school.bestAggregateSubjectCount),
     gradeBands: (savedBands.length > 0 ? savedBands : DEFAULT_GRADE_BANDS).map((band) => ({
       minScore: band.minScore,
       maxScore: band.maxScore,
@@ -89,6 +95,43 @@ async function updateClassworkSource(schoolId, { classworkSourceMode, classworkW
     classworkSourceMode, classworkWeight: classwork, projectWeight: project,
   });
   return { classworkSourceMode, classworkWeight: classwork, projectWeight: project };
+}
+
+// '' or null clears the setting back to "not configured" (the report card
+// simply omits the line it drives) rather than being coerced to 0, which
+// would read as a real (and wrong) pass mark/subject count.
+async function updateAssessmentSettings(schoolId, { passMarkPercent, bestAggregateSubjectCount }) {
+  const school = await getSchool(schoolId);
+
+  if (passMarkPercent !== undefined) {
+    if (passMarkPercent === null || passMarkPercent === '') {
+      school.passMarkPercent = null;
+    } else {
+      const value = Number(passMarkPercent);
+      if (Number.isNaN(value) || value < 0 || value > 100) {
+        throw new ApiError(400, 'passMarkPercent must be a number between 0 and 100');
+      }
+      school.passMarkPercent = value;
+    }
+  }
+
+  if (bestAggregateSubjectCount !== undefined) {
+    if (bestAggregateSubjectCount === null || bestAggregateSubjectCount === '') {
+      school.bestAggregateSubjectCount = null;
+    } else {
+      const value = Number(bestAggregateSubjectCount);
+      if (!Number.isInteger(value) || value < 1) {
+        throw new ApiError(400, 'bestAggregateSubjectCount must be a positive whole number');
+      }
+      school.bestAggregateSubjectCount = value;
+    }
+  }
+
+  await school.save();
+  return {
+    passMarkPercent: school.passMarkPercent === null ? null : Number(school.passMarkPercent),
+    bestAggregateSubjectCount: school.bestAggregateSubjectCount === null ? null : Number(school.bestAggregateSubjectCount),
+  };
 }
 
 function validateBands(bands) {
@@ -148,4 +191,5 @@ module.exports = {
   updateWeights,
   updateClassworkSource,
   updateGradeBands,
+  updateAssessmentSettings,
 };

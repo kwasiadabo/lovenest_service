@@ -1,4 +1,5 @@
 const ApiError = require('../../utils/ApiError');
+const { EFFORT_GRADES } = require('../reportCards/behaviorFields');
 
 const ITEM_TYPES = ['CLASSWORK', 'PROJECT'];
 
@@ -40,7 +41,7 @@ function validateScoreUpsert(req, res, next) {
 
 function validateExamScoreSave(req, res, next) {
   const {
-    classId, subjectId, termId, studentId, classworkRaw, examRaw, entryMode,
+    classId, subjectId, termId, studentId, classworkRaw, examRaw, entryMode, effort,
   } = req.body || {};
   if (!classId) return next(new ApiError(400, 'classId is required'));
   if (!subjectId) return next(new ApiError(400, 'subjectId is required'));
@@ -48,6 +49,9 @@ function validateExamScoreSave(req, res, next) {
   if (!studentId) return next(new ApiError(400, 'studentId is required'));
   if (!ENTRY_MODES.includes(entryMode)) {
     return next(new ApiError(400, `entryMode must be one of: ${ENTRY_MODES.join(', ')}`));
+  }
+  if (effort !== undefined && effort !== null && effort !== '' && !EFFORT_GRADES.includes(effort)) {
+    return next(new ApiError(400, `effort must be one of: ${EFFORT_GRADES.join(', ')}`));
   }
 
   // WEIGHTED's upper bound is school-specific and checked later in
@@ -79,6 +83,25 @@ function validateExamScoreScope(req, res, next) {
   return next();
 }
 
+function validateExamScoreEffortUpdate(req, res, next) {
+  const {
+    classId, subjectId, termId, studentId, effort,
+  } = req.body || {};
+  if (!classId) return next(new ApiError(400, 'classId is required'));
+  if (!subjectId) return next(new ApiError(400, 'subjectId is required'));
+  if (!termId) return next(new ApiError(400, 'termId is required'));
+  if (!studentId) return next(new ApiError(400, 'studentId is required'));
+  if (effort !== undefined && effort !== null && effort !== '' && !EFFORT_GRADES.includes(effort)) {
+    return next(new ApiError(400, `effort must be one of: ${EFFORT_GRADES.join(', ')}`));
+  }
+  return next();
+}
+
 module.exports = {
-  validateAssessmentItem, validateScoreUpsert, validateExamScoreSave, validateExamScoreScope, ENTRY_MODES,
+  validateAssessmentItem,
+  validateScoreUpsert,
+  validateExamScoreSave,
+  validateExamScoreScope,
+  validateExamScoreEffortUpdate,
+  ENTRY_MODES,
 };

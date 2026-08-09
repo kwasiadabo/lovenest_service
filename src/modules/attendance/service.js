@@ -7,6 +7,11 @@ const ApiError = require('../../utils/ApiError');
 const { resolveRoster } = require('../../utils/classRoster');
 const { notifyAttendance } = require('./notify');
 const { createNotification } = require('../notifications/service');
+const { ATTENDANCE_STATUSES } = require('./validators');
+
+function emptyStatusCounts() {
+  return Object.fromEntries(ATTENDANCE_STATUSES.map((s) => [s, 0]));
+}
 
 // Attendance is a class-teacher responsibility (ClassTeacher), not a
 // per-subject one (SubjectTeacher, as in assessment/service.js) — a subject
@@ -61,7 +66,7 @@ async function getRegister(schoolId, userId, roles, { classId, termId, date }) {
 
   const statusByStudent = {};
   for (const record of records) {
-    statusByStudent[record.studentId] = record.status;
+    statusByStudent[record.studentId] = { status: record.status, reason: record.notes || '' };
   }
 
   return { students, statuses: statusByStudent };
@@ -78,18 +83,22 @@ async function saveRegister(schoolId, userId, roles, {
   const staffMember = await tenantScoped(Staff, schoolId).findOne({ where: { userId } });
 
   const results = [];
-  for (const { studentId, status } of records) {
+  for (const { studentId, status, reason } of records) {
+    // Blank/omitted reason clears any previously-saved one rather than
+    // leaving a stale note behind — a corrected re-mark of an unlocked
+    // student should fully reflect what's on screen, not merge with it.
+    const notes = reason && reason.trim() ? reason.trim() : null;
     const existing = await tenantScoped(AttendanceRecord, schoolId).findOne({
       where: { studentId, date },
     });
     if (existing) {
       await existing.update({
-        classId, termId, status, markedByStaffId: staffMember ? staffMember.id : null,
+        classId, termId, status, notes, markedByStaffId: staffMember ? staffMember.id : null,
       });
       results.push(existing);
     } else {
       const created = await tenantScoped(AttendanceRecord, schoolId).create({
-        studentId, classId, termId, date, status, markedByStaffId: staffMember ? staffMember.id : null,
+        studentId, classId, termId, date, status, notes, markedByStaffId: staffMember ? staffMember.id : null,
       });
       results.push(created);
     }
@@ -133,10 +142,11 @@ async function getAttendanceSummary(schoolId, studentId, termId) {
   });
 
   const present = records.filter((r) => r.status === 'PRESENT').length;
+  const late = records.filter((r) => r.status === 'LATE').length;
   const absent = records.filter((r) => r.status === 'ABSENT').length;
 
   return {
-    present, absent, totalDaysRecorded: records.length,
+    present, late, absent, totalDaysRecorded: records.length,
   };
 }
 
@@ -151,11 +161,14 @@ async function getStudentAttendanceReport(schoolId, studentId, termId) {
   });
 
   const present = records.filter((r) => r.status === 'PRESENT').length;
+  const late = records.filter((r) => r.status === 'LATE').length;
   const absent = records.filter((r) => r.status === 'ABSENT').length;
 
   return {
-    summary: { present, absent, totalDaysRecorded: records.length },
-    records: records.map((r) => ({ date: r.date, status: r.status })),
+    summary: {
+      present, late, absent, totalDaysRecorded: records.length,
+    },
+    records: records.map((r) => ({ date: r.date, status: r.status, reason: r.notes || '' })),
   };
 }
 
@@ -200,7 +213,7 @@ async function getClassAttendanceReport(schoolId, userId, roles, { classId, term
 
   const rows = students.map((student) => {
     const byDate = statusByStudentAndDate[student.id] || {};
-    const counts = { PRESENT: 0, ABSENT: 0 };
+    const counts = emptyStatusCounts();
     Object.values(byDate).forEach((status) => { counts[status] += 1; });
     return {
       student, statusesByDate: byDate, counts,
@@ -217,7 +230,9 @@ function attendanceRatePercent(presentCount, totalRecords) {
 }
 
 function statusKey(status) {
-  return status === 'PRESENT' ? 'present' : 'absent';
+  if (status === 'PRESENT') return 'present';
+  if (status === 'LATE') return 'late';
+  return 'absent';
 }
 
 // ---- Attendance analytics ----
@@ -245,15 +260,17 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
   const classMap = new Map();
   const dateMap = new Map();
   const weekdayCounts = Array.from({ length: 7 }, () => ({
-    present: 0, absent: 0, total: 0,
+    present: 0, late: 0, absent: 0, total: 0,
   }));
   const studentIds = new Set();
   let presentCount = 0;
+  let lateCount = 0;
   let absentCount = 0;
 
   for (const record of records) {
     studentIds.add(record.studentId);
     if (record.status === 'PRESENT') presentCount += 1;
+    else if (record.status === 'LATE') lateCount += 1;
     else absentCount += 1;
 
     const classKey = record.classId;
@@ -262,6 +279,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
       name: record.Class?.name || 'Unknown',
       levelName: record.Class?.Level?.name || null,
       present: 0,
+      late: 0,
       absent: 0,
       total: 0,
       studentIds: new Set(),
@@ -272,7 +290,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
     classMap.set(classKey, classEntry);
 
     const dateEntry = dateMap.get(record.date) || {
-      present: 0, absent: 0, total: 0,
+      present: 0, late: 0, absent: 0, total: 0,
     };
     dateEntry[statusKey(record.status)] += 1;
     dateEntry.total += 1;
@@ -294,6 +312,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
       levelName: c.levelName,
       studentCount: c.studentIds.size,
       presentCount: c.present,
+      lateCount: c.late,
       absentCount: c.absent,
       totalRecords: c.total,
       attendanceRatePercent: attendanceRatePercent(c.present, c.total),
@@ -305,6 +324,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
     .map(([date, d]) => ({
       date,
       presentCount: d.present,
+      lateCount: d.late,
       absentCount: d.absent,
       totalRecords: d.total,
       attendanceRatePercent: attendanceRatePercent(d.present, d.total),
@@ -313,6 +333,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
   const byWeekday = weekdayCounts.map((d, i) => ({
     weekday: WEEKDAY_NAMES[i],
     presentCount: d.present,
+    lateCount: d.late,
     absentCount: d.absent,
     totalRecords: d.total,
     attendanceRatePercent: attendanceRatePercent(d.present, d.total),
@@ -329,7 +350,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
   const trendByTerm = new Map();
   for (const record of yearTermRecords) {
     const entry = trendByTerm.get(record.termId) || {
-      present: 0, absent: 0, total: 0,
+      present: 0, late: 0, absent: 0, total: 0,
     };
     entry[statusKey(record.status)] += 1;
     entry.total += 1;
@@ -337,12 +358,13 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
   }
   const termTrend = yearTerms.map((t) => {
     const entry = trendByTerm.get(t.id) || {
-      present: 0, absent: 0, total: 0,
+      present: 0, late: 0, absent: 0, total: 0,
     };
     return {
       termId: t.id,
       termName: t.name,
       totalRecords: entry.total,
+      lateCount: entry.late,
       attendanceRatePercent: attendanceRatePercent(entry.present, entry.total),
     };
   });
@@ -356,6 +378,7 @@ async function getAttendanceAnalytics(schoolId, { academicYearId, termId, classI
       distinctStudents: studentIds.size,
       distinctClasses: classMap.size,
       presentCount,
+      lateCount,
       absentCount,
       attendanceRatePercent: attendanceRatePercent(presentCount, records.length),
     },
@@ -448,6 +471,7 @@ async function getDailyOverview(schoolId, { date } = {}) {
     classesMarked: 0,
     totalStudents: 0,
     totalPresent: 0,
+    totalLate: 0,
     totalAbsent: 0,
   };
 
@@ -464,6 +488,7 @@ async function getDailyOverview(schoolId, { date } = {}) {
       : [];
 
     const presentCount = records.filter((r) => r.status === 'PRESENT').length;
+    const lateCount = records.filter((r) => r.status === 'LATE').length;
     const absentCount = records.filter((r) => r.status === 'ABSENT').length;
     const unmarkedCount = students.length - records.length;
     const status = records.length === 0 ? 'NOT_MARKED' : unmarkedCount > 0 ? 'PARTIAL' : 'COMPLETE';
@@ -475,6 +500,7 @@ async function getDailyOverview(schoolId, { date } = {}) {
 
     totals.totalStudents += students.length;
     totals.totalPresent += presentCount;
+    totals.totalLate += lateCount;
     totals.totalAbsent += absentCount;
     if (status !== 'NOT_MARKED') totals.classesMarked += 1;
 
@@ -488,6 +514,7 @@ async function getDailyOverview(schoolId, { date } = {}) {
       })),
       totalStudents: students.length,
       present: presentCount,
+      late: lateCount,
       absent: absentCount,
       unmarked: unmarkedCount,
       status,
@@ -506,12 +533,60 @@ async function getDailyOverview(schoolId, { date } = {}) {
     totals: {
       ...totals,
       classesNotMarked: totals.totalClasses - totals.classesMarked,
-      totalUnmarked: totals.totalStudents - totals.totalPresent - totals.totalAbsent,
+      totalUnmarked: totals.totalStudents - totals.totalPresent - totals.totalLate - totals.totalAbsent,
       attendanceRatePercent: totals.totalStudents > 0
         ? Math.round((totals.totalPresent / totals.totalStudents) * 100) : 0,
     },
     classes: classRows,
   };
+}
+
+// Admin/headmaster-configurable daily windows — plain "HH:MM" columns on
+// School (same convention as grading weights/sibling discount: a scalar
+// per-school setting lives directly on the School row, not a separate
+// table). Read via AttendanceRegisterPage to auto-suggest Present/Late/
+// Absent from the current time, teacher can always override by hand.
+async function getAttendanceSettings(schoolId) {
+  const school = await School.findByPk(schoolId, {
+    attributes: ['id', 'attendanceReportingTime', 'attendanceLatenessCutoffTime', 'attendanceAutoAbsentCutoffTime'],
+  });
+  if (!school) throw new ApiError(404, 'School not found');
+
+  return {
+    reportingTime: school.attendanceReportingTime,
+    latenessCutoffTime: school.attendanceLatenessCutoffTime,
+    autoAbsentCutoffTime: school.attendanceAutoAbsentCutoffTime,
+  };
+}
+
+// Partial-PATCH, same convention as schoolSettings/service.js#updateSettings
+// — an omitted field is left unchanged. Format is validated at the route
+// layer (validators.js); ordering (reporting <= lateness <= auto-absent) is
+// checked here since it needs the final merged values, not just whichever
+// fields happen to be present on this one request.
+async function updateAttendanceSettings(schoolId, {
+  reportingTime, latenessCutoffTime, autoAbsentCutoffTime,
+}) {
+  const school = await School.findByPk(schoolId, {
+    attributes: ['id', 'attendanceReportingTime', 'attendanceLatenessCutoffTime', 'attendanceAutoAbsentCutoffTime'],
+  });
+  if (!school) throw new ApiError(404, 'School not found');
+
+  const next = {
+    reportingTime: reportingTime !== undefined ? reportingTime : school.attendanceReportingTime,
+    latenessCutoffTime: latenessCutoffTime !== undefined ? latenessCutoffTime : school.attendanceLatenessCutoffTime,
+    autoAbsentCutoffTime: autoAbsentCutoffTime !== undefined ? autoAbsentCutoffTime : school.attendanceAutoAbsentCutoffTime,
+  };
+  if (!(next.reportingTime <= next.latenessCutoffTime && next.latenessCutoffTime <= next.autoAbsentCutoffTime)) {
+    throw new ApiError(400, 'Reporting time must be at or before the lateness cutoff, which must be at or before the auto-absent cutoff.');
+  }
+
+  school.attendanceReportingTime = next.reportingTime;
+  school.attendanceLatenessCutoffTime = next.latenessCutoffTime;
+  school.attendanceAutoAbsentCutoffTime = next.autoAbsentCutoffTime;
+  await school.save();
+
+  return next;
 }
 
 // One school's slice of the daily reminder sweep (see
@@ -589,6 +664,8 @@ module.exports = {
   getMyAttendanceAnalytics,
   getMyRegisterStatusToday,
   getDailyOverview,
+  getAttendanceSettings,
+  updateAttendanceSettings,
   sendRegisterReminders,
   runDailyRegisterReminderSweep,
 };

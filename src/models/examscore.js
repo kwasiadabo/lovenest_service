@@ -15,6 +15,11 @@ module.exports = (sequelize, DataTypes) => {
     examRaw: { type: DataTypes.DECIMAL(6, 2), allowNull: false },
     examScaled: { type: DataTypes.DECIMAL(6, 2), allowNull: false },
     totalScore: { type: DataTypes.DECIMAL(6, 2), allowNull: false },
+    // A-E effort grade (see reportCards/behaviorFields.js's EFFORT_SCHEME),
+    // teacher-entered alongside CA/exam marks — separate from the
+    // score-derived academic grade, since effort is a subjective judgment,
+    // not something resolveGrade() can compute from a number.
+    effort: { type: DataTypes.STRING(2), allowNull: true },
     recordedByStaffId: { type: DataTypes.UUID, allowNull: true },
     status: { type: DataTypes.ENUM('DRAFT', 'CONFIRMED'), allowNull: false, defaultValue: 'DRAFT' },
     confirmedAt: { type: DataTypes.DATE, allowNull: true },

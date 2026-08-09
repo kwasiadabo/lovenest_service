@@ -46,6 +46,19 @@ const setClassNextTermStartDate = wrap(async (req, res) => {
   ));
 });
 
+const history = wrap(async (req, res) => {
+  const { studentId, academicYearId } = req.params;
+  res.json(await service.getReportCardHistory(req.schoolId, req.auth.userId, req.auth.roles, studentId, academicYearId));
+});
+
 module.exports = {
-  generate, classSummary, getRemarks, updateRemarks, updateHeadteacherRemark, publish, publishAll, setClassNextTermStartDate,
+  generate,
+  classSummary,
+  getRemarks,
+  updateRemarks,
+  updateHeadteacherRemark,
+  publish,
+  publishAll,
+  setClassNextTermStartDate,
+  history,
 };

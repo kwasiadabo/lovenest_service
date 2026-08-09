@@ -7,7 +7,7 @@ const {
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
 const assertNotSelfReversal = require('../../utils/assertNotSelfReversal');
-const { notifyPaymentReceipt } = require('./notify');
+const { notifyPaymentReceipt, notifyBillEmail, notifyBillsEmailed } = require('./notify');
 const messagingService = require('../messaging/service');
 const notificationsService = require('../notifications/service');
 const { postJournalEntry, reverseEntryFor } = require('../accounting/ledgerPoster');
@@ -646,45 +646,111 @@ async function postBillConfirmation(schoolId, bill, userId, transaction) {
   }, transaction);
 }
 
+// Flips one bill to CONFIRMED and posts its ledger entry inside an
+// already-open transaction — shared by the single-bill and batch confirm
+// entry points below so the two can never drift apart.
+async function confirmBillInTransaction(schoolId, billId, userId, transaction) {
+  const bill = await tenantScoped(Bill, schoolId).findByPk(billId, { transaction });
+  if (!bill) throw new ApiError(404, 'Bill not found');
+  if (bill.status === 'CONFIRMED') return { bill, alreadyConfirmed: true };
+
+  bill.status = 'CONFIRMED';
+  bill.confirmedByUserId = userId;
+  bill.confirmedAt = new Date();
+  await bill.save({ transaction });
+
+  await postBillConfirmation(schoolId, bill, userId, transaction);
+
+  return { bill, alreadyConfirmed: false };
+}
+
+// Best-effort in-app notification + parent email for one just-confirmed
+// bill. Each half is independently try/caught (not just the email side,
+// which already swallows per-parent failures internally) so a broken
+// notifications query can never make a bill that's already confirmed and
+// committed look like the confirmation itself failed.
+async function notifyBillConfirmed(schoolId, bill, school) {
+  try {
+    await notificationsService.notifyParentsOfStudent(schoolId, bill.studentId, {
+      type: 'BILL_CONFIRMED',
+      title: 'Bill confirmed',
+      body: 'Your child\'s bill for this term has been confirmed and is ready to view.',
+      linkUrl: `/parent/children/${bill.studentId}/bills`,
+    });
+  } catch {
+    // Best-effort — see comment above.
+  }
+
+  try {
+    const fullBill = await tenantScoped(Bill, schoolId).findByPk(bill.id, {
+      include: [Student, Term, { model: BillItem, as: 'items', include: [FeeType] }],
+    });
+    await notifyBillEmail(schoolId, { school, bill: fullBill });
+  } catch {
+    // Best-effort — see comment above.
+  }
+}
+
 async function confirmBill(schoolId, billId, userId) {
-  const result = await sequelize.transaction(async (transaction) => {
-    const bill = await tenantScoped(Bill, schoolId).findByPk(billId, { transaction });
-    if (!bill) throw new ApiError(404, 'Bill not found');
-    if (bill.status === 'CONFIRMED') return { bill, alreadyConfirmed: true };
-
-    bill.status = 'CONFIRMED';
-    bill.confirmedByUserId = userId;
-    bill.confirmedAt = new Date();
-    await bill.save({ transaction });
-
-    await postBillConfirmation(schoolId, bill, userId, transaction);
-
-    return { bill, alreadyConfirmed: false };
-  });
+  const result = await sequelize.transaction(
+    (transaction) => confirmBillInTransaction(schoolId, billId, userId, transaction),
+  );
 
   // Notify only on an actual confirmation, once the transaction has
   // committed — matches reportCards/service.js#publishReportCard's own
   // notifyParentsOfStudent call for the equivalent "just happened" event.
   if (!result.alreadyConfirmed) {
-    await notificationsService.notifyParentsOfStudent(schoolId, result.bill.studentId, {
-      type: 'BILL_CONFIRMED',
-      title: 'Bill confirmed',
-      body: 'Your child\'s bill for this term has been confirmed and is ready to view.',
-      linkUrl: `/parent/children/${result.bill.studentId}/bills`,
-    });
+    const school = await School.findByPk(schoolId);
+    await notifyBillConfirmed(schoolId, result.bill, school);
   }
 
   return result;
 }
 
+// Confirming a batch used to loop calling confirmBill per id — N separate
+// transactions (each with its own begin/commit round trip) for what's
+// conceptually one action, which is most of what made confirming a whole
+// class or level slow. All N status flips + ledger postings now share a
+// single transaction instead (entryNumber generation still needs these
+// sequential — see ledgerPoster.js#generateEntryNumber — so the DB writes
+// themselves aren't parallelized, just no longer paying for N transactions).
+// The post-commit notifications for every newly-confirmed bill, which don't
+// share that ordering constraint, run concurrently rather than one at a time.
 async function confirmBills(schoolId, billIds, userId) {
-  const confirmed = [];
-  const alreadyConfirmed = [];
-  for (const billId of billIds) {
-    const result = await confirmBill(schoolId, billId, userId);
-    (result.alreadyConfirmed ? alreadyConfirmed : confirmed).push(result.bill.id);
+  const results = await sequelize.transaction(async (transaction) => {
+    const out = [];
+    for (const billId of billIds) {
+      out.push(await confirmBillInTransaction(schoolId, billId, userId, transaction));
+    }
+    return out;
+  });
+
+  const newlyConfirmed = results.filter((r) => !r.alreadyConfirmed);
+  if (newlyConfirmed.length > 0) {
+    const school = await School.findByPk(schoolId);
+    await Promise.all(newlyConfirmed.map((r) => notifyBillConfirmed(schoolId, r.bill, school)));
   }
-  return { confirmed, alreadyConfirmed };
+
+  return {
+    confirmed: newlyConfirmed.map((r) => r.bill.id),
+    alreadyConfirmed: results.filter((r) => r.alreadyConfirmed).map((r) => r.bill.id),
+  };
+}
+
+// Manual "Email bills to parents" action for already-confirmed bills — same
+// email notifyBillConfirmed already sends automatically right after
+// confirmation, callable again standalone to resend, or to backfill bills
+// that were confirmed before this feature existed. Silently ignores any
+// billId that isn't actually confirmed rather than erroring, since the
+// caller (View Confirmed Bills' bulk action) only ever offers confirmed rows.
+async function emailBills(schoolId, billIds) {
+  const bills = await tenantScoped(Bill, schoolId).findAll({
+    where: { id: billIds, status: 'CONFIRMED' },
+    include: [Student, Term, { model: BillItem, as: 'items', include: [FeeType] }],
+  });
+  const school = await School.findByPk(schoolId);
+  const { email } = await notifyBillsEmailed(schoolId, { school, bills });
+  return { billsEmailed: bills.length, email };
 }
 
 // ---- Student ledger ----
@@ -1578,6 +1644,7 @@ module.exports = {
   removeBillItem,
   confirmBill,
   confirmBills,
+  emailBills,
   getStudentLedger,
   getStudentFinancialStatement,
   recordPayment,

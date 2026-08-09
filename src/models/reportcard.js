@@ -14,6 +14,16 @@ module.exports = (sequelize, DataTypes) => {
     interest: { type: DataTypes.STRING(200), allowNull: true },
     classTeacherRemark: { type: DataTypes.STRING(1000), allowNull: true },
     headteacherRemark: { type: DataTypes.STRING(1000), allowNull: true },
+    // JSON-serialized against a fixed key set (see reportCards/
+    // behaviorFields.js) — TEXT rather than DataTypes.JSON, matching this
+    // app's existing convention for serialized blobs (see
+    // ImportBatch.rowsJson, BillPaymentRevision.previousValues/newValues).
+    // behaviorProgress: { [key]: 0-100 }. The three comment blocks:
+    // { [key]: string }.
+    behaviorProgress: { type: DataTypes.TEXT, allowNull: true },
+    generalComments: { type: DataTypes.TEXT, allowNull: true },
+    learningBehaviourComments: { type: DataTypes.TEXT, allowNull: true },
+    growthMindsetComments: { type: DataTypes.TEXT, allowNull: true },
     promotionStatus: {
       type: DataTypes.ENUM('PROMOTED', 'REPEATED', 'NOT_APPLICABLE'),
       allowNull: false,

@@ -136,9 +136,11 @@ async function getAttendanceHistory(schoolId, studentId) {
       startDate: record.Term.AcademicYear.startDate,
       sequence: record.Term.sequence,
       present: 0,
+      late: 0,
       absent: 0,
     };
     if (record.status === 'PRESENT') entry.present += 1;
+    else if (record.status === 'LATE') entry.late += 1;
     else if (record.status === 'ABSENT') entry.absent += 1;
     byTerm.set(key, entry);
   }
@@ -150,14 +152,16 @@ async function getAttendanceHistory(schoolId, studentId) {
       termName: t.termName,
       academicYearName: t.academicYearName,
       present: t.present,
+      late: t.late,
       absent: t.absent,
-      totalDaysRecorded: t.present + t.absent,
+      totalDaysRecorded: t.present + t.late + t.absent,
     }));
 
   return {
     byTerm: byTermSorted,
     summary: {
       present: records.filter((r) => r.status === 'PRESENT').length,
+      late: records.filter((r) => r.status === 'LATE').length,
       absent: records.filter((r) => r.status === 'ABSENT').length,
       totalDaysRecorded: records.length,
     },

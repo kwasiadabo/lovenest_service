@@ -18,6 +18,11 @@ module.exports = (sequelize, DataTypes) => {
     // that; the running balance is always computed from JournalLine sums.
     openingBalancePesewas: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    // The single cash account a parent's online (Paystack) fee payment posts
+    // against — resolved by parentPortal/service.js#resolveOnlineCashAccountId.
+    // Not DB-enforced as a singleton; the service throws a clean 409 if a
+    // school has none set, and callers are expected to set at most one.
+    isOnlineDefault: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   }, {
     tableName: 'cash_accounts',
     indexes: [

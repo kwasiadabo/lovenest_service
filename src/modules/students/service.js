@@ -11,6 +11,7 @@ const { postJournalEntry, reverseEntryFor } = require('../accounting/ledgerPoste
 const { FEE_CATEGORY_ACCOUNT_CODES } = require('../../utils/defaultChartOfAccounts');
 const { resolveParentRecipients } = require('../messaging/recipients');
 const { sendBatch } = require('../messaging/service');
+const { notifyPreschoolProspectus } = require('./notify');
 
 const assignmentInclude = [
   { model: Class, include: [Level] },
@@ -213,8 +214,15 @@ async function recordAdmissionPayment(schoolId, studentId, userId, {
 
   const amountPesewas = items.reduce((sum, item) => sum + Number(item.amountPesewas), 0);
 
-  return sequelize.transaction(async (transaction) => {
+  // Tracks whether this call is the one that completes admission (transitions
+  // a CLASS_ASSIGNED student to ADMITTED, per admissionStageFor above) rather
+  // than a correction to an already-recorded payment — the prospectus email
+  // below should only ever fire once, on that transition.
+  let wasFirstPayment = false;
+
+  const result = await sequelize.transaction(async (transaction) => {
     const existing = await tenantScoped(AdmissionPayment, schoolId).findOne({ where: { studentId }, transaction });
+    wasFirstPayment = !existing;
     const fields = {
       amountPesewas,
       method,
@@ -241,6 +249,31 @@ async function recordAdmissionPayment(schoolId, studentId, userId, {
       transaction,
     });
   });
+
+  if (wasFirstPayment) {
+    // Best-effort, outside the transaction and never allowed to affect the
+    // response — same convention as financials/service.js#recordPayment's
+    // notifyPaymentReceipt call.
+    try {
+      const currentYear = await tenantScoped(AcademicYear, schoolId).findOne({ where: { isCurrent: true } });
+      const currentClassAssignment = currentYear
+        ? await tenantScoped(StudentClassAssignment, schoolId).findOne({
+          where: { studentId, academicYearId: currentYear.id },
+          include: [{ model: Class, include: [Level] }],
+        })
+        : null;
+      const category = currentClassAssignment?.Class?.Level?.category;
+      if (category === 'NURSERY' || category === 'KG') {
+        const school = await School.findByPk(schoolId);
+        await notifyPreschoolProspectus(schoolId, { school, student });
+      }
+    } catch {
+      // Swallowed — a failed prospectus email must never fail an admission
+      // payment that's already recorded, same as notifyPaymentReceipt.
+    }
+  }
+
+  return result;
 }
 
 // Every admission fee payment ever recorded, optionally scoped by date range
@@ -305,7 +338,22 @@ async function getAdmissionPaymentsReport(schoolId, {
 
 async function listStudents(schoolId, { status } = {}) {
   const students = await tenantScoped(Student, schoolId).findAll({
-    where: status ? { status } : undefined,
+    // Excludes every row still sitting in the public admissions pipeline
+    // (see models/student.js) — a submitted-but-not-yet-accepted applicant
+    // must never surface in ordinary rosters, billing, or attendance. Once
+    // accepted, applicantStatus is 'ACCEPTED' (not cleared to null), so both
+    // values must be allowed here — plain applicantStatus: null would also
+    // need this same [Op.or] shape, since SQL's three-valued logic makes
+    // `<> 'ACCEPTED'` silently drop every NULL row too.
+    // admissions/service.js queries Student directly (bypassing this
+    // function) for its own applicant-only views.
+    where: {
+      ...(status ? { status } : undefined),
+      [Op.or]: [{ applicantStatus: null }, { applicantStatus: 'ACCEPTED' }],
+    },
+    // selfDismissalSetBy: just enough to show "set by {name}" on the Pickup
+    // & Dismissal section without a separate round trip.
+    include: [{ model: User, as: 'selfDismissalSetBy', attributes: ['id', 'fullName'] }],
     order: [['lastName', 'ASC'], ['firstName', 'ASC']],
   });
 
@@ -468,6 +516,24 @@ async function setStudentDiscount(schoolId, studentId, {
     individualDiscountPercent: discountType === 'PERCENT' ? Number(discountPercent) : null,
     individualDiscountFlatPesewas: discountType === 'FLAT' ? Number(discountFlatPesewas) : null,
     individualDiscountReason: discountReason?.trim() || null,
+  });
+  return student;
+}
+
+// A deliberate safeguarding sign-off (see gateLog/service.js's missed-pickup
+// sweep, which excludes self-dismissal-authorized students entirely) —
+// SCHOOL_ADMIN-only at the route level (routes.js), not the customizable
+// `students` permission matrix, since a wrong toggle here has physical-
+// safety consequences. Always stamps who/when, even when turning it off.
+async function setStudentSelfDismissal(schoolId, studentId, userId, { selfDismissalAuthorized, selfDismissalNote }) {
+  const student = await tenantScoped(Student, schoolId).findByPk(studentId);
+  if (!student) throw new ApiError(404, 'Student not found');
+
+  await student.update({
+    selfDismissalAuthorized,
+    selfDismissalNote: selfDismissalAuthorized ? (selfDismissalNote?.trim() || null) : null,
+    selfDismissalSetByUserId: userId,
+    selfDismissalSetAt: new Date(),
   });
   return student;
 }
@@ -957,6 +1023,7 @@ module.exports = {
   setStudentStatus,
   graduateStudents,
   setStudentDiscount,
+  setStudentSelfDismissal,
   recordAdmissionPayment,
   getAdmissionPaymentsReport,
   listClassAssignments,

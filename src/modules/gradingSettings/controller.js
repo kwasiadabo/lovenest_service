@@ -18,6 +18,10 @@ const updateClassworkSource = wrap(async (req, res) => {
   res.json(await service.updateClassworkSource(req.schoolId, req.body));
 });
 
+const updateAssessmentSettings = wrap(async (req, res) => {
+  res.json(await service.updateAssessmentSettings(req.schoolId, req.body));
+});
+
 module.exports = {
-  getGradingSettings, updateWeights, updateGradeBands, updateClassworkSource,
+  getGradingSettings, updateWeights, updateGradeBands, updateClassworkSource, updateAssessmentSettings,
 };

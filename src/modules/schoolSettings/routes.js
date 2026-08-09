@@ -4,7 +4,7 @@ const { validateUpdateSettings } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requirePermission } = require('../../middleware/permissionGuard');
-const { uploadSignature } = require('../../middleware/upload');
+const { uploadSignature, uploadLogo } = require('../../middleware/upload');
 
 const router = express.Router();
 
@@ -18,5 +18,6 @@ router.patch('/school-settings', adminOnly, validateUpdateSettings, controller.u
 // upload), so it goes through its own route + middleware rather than mixing
 // body-parsing modes on one endpoint.
 router.patch('/school-settings/signature', adminOnly, uploadSignature, controller.updateSignature);
+router.patch('/school-settings/logo', adminOnly, uploadLogo, controller.updateLogo);
 
 module.exports = router;

@@ -3,3 +3,4 @@ node_modules/
 *.log
 uploads/
 test-results/
+.claude/settings.local.json

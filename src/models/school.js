@@ -26,6 +26,20 @@ module.exports = (sequelize, DataTypes) => {
     // notes) — school-level since it applies to every bill, not tied to a
     // single PaymentAccount row.
     paymentInstructions: DataTypes.TEXT,
+    // Up to two "#rrggbb" hex colors chosen by the school's own admin via
+    // Settings — used only on documents meant to carry the school's own
+    // look (currently just the student ID card), never for the admin app's
+    // own chrome (see tenantAccentColor.js's note on why the signed-in app
+    // itself stays on the fixed product brand color). brandColorSecondary is
+    // optional even when brandColor is set — a template that only needs one
+    // color (e.g. "classic") just ignores it. Null = fall back to the
+    // template's own fixed default color(s).
+    brandColor: { type: DataTypes.STRING(7), allowNull: true },
+    brandColorSecondary: { type: DataTypes.STRING(7), allowNull: true },
+    // Which of the id-card templates (see frontend's idCardTemplates/) this
+    // school's cards render as — a school-wide choice, not per-card, so
+    // every generated/printed card stays visually consistent.
+    idCardTemplate: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'classic' },
     // 'pending' (provisioned, no plan chosen yet) -> 'trial' | 'active' (plan
     // chosen; 'active' after a paid plan is verified) -> 'suspended'.
     status: {
@@ -104,11 +118,35 @@ module.exports = (sequelize, DataTypes) => {
     classworkSourceMode: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'MANUAL' },
     classworkWeight: { type: DataTypes.DECIMAL(4, 3), allowNull: false, defaultValue: 0.5 },
     projectWeight: { type: DataTypes.DECIMAL(4, 3), allowNull: false, defaultValue: 0.5 },
+    // Report card extras — both null/unset by default (feature simply
+    // doesn't render until a school opts in, see
+    // reportCards/service.js#buildReportCardPayload). passMarkPercent drives
+    // subjects-passed/failed; bestAggregateSubjectCount only ever applies
+    // when every one of the school's own GradeBand.grade values parses as an
+    // integer (a BECE-style 1-9 scale) — on a letter scale (A/B/C...) there's
+    // no numeric grade-point to sum, so that stat is omitted regardless of
+    // this setting.
+    passMarkPercent: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
+    bestAggregateSubjectCount: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 6 },
     // Sibling discount on TERM fees, applied per family (students sharing a
     // Parent record) when generating bills — see financials/service.js
     // #resolveSiblingDiscountPercent. Both default to 0 (no discount).
     thirdChildDiscountPercent: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
     fourthChildAndAboveDiscountPercent: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 },
+    // Daily attendance windows, admin/headmaster-configurable (see
+    // attendance/service.js#getAttendanceSettings). Plain "HH:MM" 24h
+    // strings, same convention as timetable_periods.startTime/endTime and
+    // transport_routes.scheduledTime — never a SQL TIME column. A student
+    // marked at/before latenessCutoffTime is Present, up to
+    // autoAbsentCutoffTime is Late, after that Absent.
+    attendanceReportingTime: { type: DataTypes.STRING(5), allowNull: false, defaultValue: '08:00' },
+    attendanceLatenessCutoffTime: { type: DataTypes.STRING(5), allowNull: false, defaultValue: '08:15' },
+    attendanceAutoAbsentCutoffTime: { type: DataTypes.STRING(5), allowNull: false, defaultValue: '10:00' },
+    // Admin/headmaster-configurable school-day-end time, read by
+    // gateLog/service.js#runMissedPickupSweep to flag a checked-in student
+    // with no checkout recorded. Same "HH:MM" string convention as the
+    // attendance times above.
+    gateLogDismissalTime: { type: DataTypes.STRING(5), allowNull: false, defaultValue: '15:00' },
   }, {
     tableName: 'schools',
   });

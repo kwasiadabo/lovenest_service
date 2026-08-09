@@ -26,6 +26,7 @@ router.post('/bills/preview', billingRoles, validatePreviewBills, controller.pre
 router.get('/bills/analytics', billingRoles, controller.getBillAnalytics);
 router.get('/bills', billingRoles, controller.listBills);
 router.post('/bills/confirm-batch', billingRoles, validateConfirmBatch, controller.confirmBills);
+router.post('/bills/email', billingRoles, validateConfirmBatch, controller.emailBills);
 router.post('/bills/:id/confirm', billingRoles, controller.confirmBill);
 router.post('/bills/:id/items', billingRoles, validateSpecialItem, controller.addSpecialItem);
 router.delete('/bill-items/:id', billingRoles, controller.removeBillItem);

@@ -2,6 +2,7 @@ const express = require('express');
 const controller = require('./controller');
 const {
   validateRegisterQuery, validateRegisterSave, validateSummaryQuery, validateClassReportQuery,
+  validateAttendanceSettingsUpdate,
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
@@ -25,5 +26,7 @@ router.get('/attendance/analytics', analyticsRoles, controller.getAnalytics);
 router.get('/attendance/my-analytics', attendanceRoles, controller.getMyAnalytics);
 router.get('/attendance/my-register-status', attendanceRoles, controller.getMyRegisterStatus);
 router.get('/attendance/daily-overview', analyticsRoles, controller.getDailyOverview);
+router.get('/attendance/settings', analyticsRoles, controller.getAttendanceSettings);
+router.patch('/attendance/settings', analyticsRoles, validateAttendanceSettingsUpdate, controller.updateAttendanceSettings);
 
 module.exports = router;

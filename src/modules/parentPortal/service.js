@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const {
   Parent, StudentParent, Student, AcademicYear, StudentClassAssignment, Class, Level,
+  Payment, CashAccount, BillPayment, User,
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
@@ -195,6 +197,193 @@ async function addIssueMessage(schoolId, userId, issueId, body) {
   return issuesService.addParentMessage(schoolId, userId, issueId, body);
 }
 
+const PAYSTACK_BASE_URL = 'https://api.paystack.co';
+
+function requirePaystackSecretKey() {
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  if (!key) throw new ApiError(500, 'Payment provider is not configured yet');
+  return key;
+}
+
+// The single cash account a school has designated to receive parent-initiated
+// online payments (CashAccountsPage.jsx's "Use for online payments" toggle).
+// Not DB-enforced as a singleton — if more than one is ever flagged, the
+// first found wins; callers are expected to only flag one.
+async function resolveOnlineCashAccountId(schoolId) {
+  const account = await tenantScoped(CashAccount, schoolId).findOne({
+    where: { isOnlineDefault: true, isActive: true },
+  });
+  if (!account) throw new ApiError(409, 'Online payments are not configured for this school yet.');
+  return account.id;
+}
+
+// Starts a parent-initiated Paystack payment for a child's full outstanding
+// fee balance. Same server-redirect mechanics as billing/service.js's
+// platform-subscription flow, just scoped to one student's balance instead
+// of a plan price, and tracked on the same Payment model via
+// purpose: 'fee_payment' (see models/payment.js).
+async function initializeFeePayment(schoolId, userId, studentId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+
+  const balancePesewas = await financialsService.computeStudentBalancePesewas(schoolId, studentId);
+  if (balancePesewas <= 0) {
+    throw new ApiError(409, 'This child has no outstanding balance to pay.');
+  }
+  // Fail fast, before creating a Payment row or calling out to Paystack, if
+  // the school hasn't configured where online payments should land.
+  await resolveOnlineCashAccountId(schoolId);
+
+  const user = await User.findByPk(userId);
+  const secretKey = requirePaystackSecretKey();
+  const reference = `vx_fee_${crypto.randomUUID()}`;
+
+  const payment = await Payment.create({
+    schoolId,
+    purpose: 'fee_payment',
+    planCode: 'fee_payment',
+    amountPesewas: balancePesewas,
+    currency: 'GHS',
+    reference,
+    status: 'pending',
+    studentId,
+  });
+
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  let response;
+  let data;
+  try {
+    response = await fetch(`${PAYSTACK_BASE_URL}/transaction/initialize`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: user.email,
+        amount: balancePesewas,
+        currency: 'GHS',
+        reference,
+        callback_url: `${appUrl}/parent/billing/callback?studentId=${studentId}`,
+        metadata: { schoolId, studentId, purpose: 'fee_payment' },
+        // Parents pay online via bank transfer or mobile money only — no
+        // card/USSD/QR on the hosted checkout page.
+        channels: ['bank_transfer', 'mobile_money'],
+      }),
+    });
+    data = await response.json();
+  } catch (err) {
+    payment.status = 'failed';
+    await payment.save();
+    throw new ApiError(502, 'Could not reach payment provider');
+  }
+
+  if (!response.ok || !data.status) {
+    payment.status = 'failed';
+    await payment.save();
+    throw new ApiError(502, data.message || 'Failed to initialize payment');
+  }
+
+  return { authorizationUrl: data.data.authorization_url, reference };
+}
+
+// Idempotent — safe to call from both the parent's browser (on redirect back
+// from Paystack) and the webhook, whichever lands first. Guards against
+// double-recording by checking for an already-written BillPayment with this
+// Paystack reference before calling financialsService.recordPayment, which
+// is the exact same write path admin-recorded payments use (receipt
+// numbering, GL journal posting, and SMS/email receipt notification all
+// come along for free).
+async function applySuccessfulFeePayment(payment) {
+  if (payment.status === 'success') return payment;
+
+  const alreadyRecorded = await tenantScoped(BillPayment, payment.schoolId).findOne({
+    where: { reference: payment.reference },
+  });
+  if (!alreadyRecorded) {
+    const cashAccountId = await resolveOnlineCashAccountId(payment.schoolId);
+    await financialsService.recordPayment(payment.schoolId, payment.studentId, null, {
+      amountPesewas: payment.amountPesewas,
+      method: 'MOBILE_MONEY',
+      paidDate: new Date(),
+      reference: payment.reference,
+      notes: 'Paid online via Paystack',
+      cashAccountId,
+    });
+  }
+
+  payment.status = 'success';
+  payment.paidAt = new Date();
+  await payment.save();
+  return payment;
+}
+
+async function verifyFeePayment(schoolId, userId, reference) {
+  const payment = await Payment.findOne({ where: { reference, schoolId, purpose: 'fee_payment' } });
+  if (!payment) throw new ApiError(404, 'Payment not found');
+  await assertParentOwnsStudent(schoolId, userId, payment.studentId);
+
+  if (payment.status === 'success') {
+    const balancePesewas = await financialsService.computeStudentBalancePesewas(schoolId, payment.studentId);
+    return { status: payment.status, balancePesewas };
+  }
+
+  const secretKey = requirePaystackSecretKey();
+  let response;
+  let data;
+  try {
+    response = await fetch(`${PAYSTACK_BASE_URL}/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+    });
+    data = await response.json();
+  } catch (err) {
+    throw new ApiError(502, 'Could not reach payment provider');
+  }
+
+  if (!response.ok || !data.status) {
+    throw new ApiError(502, data.message || 'Failed to verify payment');
+  }
+
+  const tx = data.data;
+  const isValid = tx.status === 'success'
+    && tx.amount === payment.amountPesewas
+    && tx.currency === payment.currency;
+
+  payment.rawResponse = JSON.stringify(tx);
+
+  if (!isValid) {
+    payment.status = 'failed';
+    await payment.save();
+    throw new ApiError(400, 'Payment could not be verified');
+  }
+
+  await payment.save();
+  await applySuccessfulFeePayment(payment);
+  const balancePesewas = await financialsService.computeStudentBalancePesewas(schoolId, payment.studentId);
+  return { status: payment.status, balancePesewas };
+}
+
+// Called from billing/controller.js#webhook, which already dispatches every
+// incoming Paystack event to multiple handlers and expects each to no-op if
+// the event isn't theirs — this one only acts on 'vx_fee_'-prefixed
+// references, covering the case a parent closes the tab before the
+// redirect-driven verifyFeePayment above ever runs.
+async function handleFeePaymentWebhookEvent(event) {
+  if (event.event !== 'charge.success') return;
+  const reference = event.data && event.data.reference;
+  if (!reference || !reference.startsWith('vx_fee_')) return;
+
+  const payment = await Payment.findOne({ where: { reference, purpose: 'fee_payment' } });
+  if (!payment || payment.status === 'success') return;
+
+  const isValid = event.data.status === 'success'
+    && event.data.amount === payment.amountPesewas
+    && event.data.currency === payment.currency;
+  if (!isValid) return;
+
+  payment.rawResponse = JSON.stringify(event.data);
+  await applySuccessfulFeePayment(payment);
+}
+
 module.exports = {
   getChildren,
   getReportCard,
@@ -215,4 +404,7 @@ module.exports = {
   getTransport,
   getTransportHistory,
   getLiveTransport,
+  initializeFeePayment,
+  verifyFeePayment,
+  handleFeePaymentWebhookEvent,
 };

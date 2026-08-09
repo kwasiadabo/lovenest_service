@@ -123,15 +123,31 @@ async function createCashAccount(schoolId, {
   return sequelize.transaction(run);
 }
 
-async function updateCashAccount(schoolId, cashAccountId, { name, bankName, accountNumber, isActive }) {
+async function updateCashAccount(schoolId, cashAccountId, {
+  name, bankName, accountNumber, isActive, isOnlineDefault,
+}) {
   const cashAccount = await tenantScoped(CashAccount, schoolId).findByPk(cashAccountId);
   if (!cashAccount) throw new ApiError(404, 'Cash account not found');
-  await cashAccount.update({
-    name: name !== undefined ? name : cashAccount.name,
-    bankName: bankName !== undefined ? bankName : cashAccount.bankName,
-    accountNumber: accountNumber !== undefined ? accountNumber : cashAccount.accountNumber,
-    isActive: isActive !== undefined ? isActive : cashAccount.isActive,
+
+  await sequelize.transaction(async (transaction) => {
+    // Only one cash account can be the online-payments target at a time —
+    // enforced here rather than in the DB (see models/cashaccount.js), so
+    // flagging this one true always clears any other for the school first.
+    if (isOnlineDefault === true) {
+      await tenantScoped(CashAccount, schoolId).update(
+        { isOnlineDefault: false },
+        { where: { id: { [Op.ne]: cashAccountId } }, transaction },
+      );
+    }
+    await cashAccount.update({
+      name: name !== undefined ? name : cashAccount.name,
+      bankName: bankName !== undefined ? bankName : cashAccount.bankName,
+      accountNumber: accountNumber !== undefined ? accountNumber : cashAccount.accountNumber,
+      isActive: isActive !== undefined ? isActive : cashAccount.isActive,
+      isOnlineDefault: isOnlineDefault !== undefined ? isOnlineDefault : cashAccount.isOnlineDefault,
+    }, { transaction });
   });
+
   return cashAccount;
 }
 

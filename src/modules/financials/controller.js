@@ -34,6 +34,10 @@ const confirmBills = wrap(async (req, res) => {
   res.json(await financialsService.confirmBills(req.schoolId, req.body.billIds, req.auth.userId));
 });
 
+const emailBills = wrap(async (req, res) => {
+  res.json(await financialsService.emailBills(req.schoolId, req.body.billIds));
+});
+
 const addSpecialItem = wrap(async (req, res) => {
   res.status(201).json(await financialsService.addSpecialItem(req.schoolId, req.params.id, req.body));
 });
@@ -115,6 +119,7 @@ module.exports = {
   listBills,
   confirmBill,
   confirmBills,
+  emailBills,
   addSpecialItem,
   removeBillItem,
   getStudentLedger,

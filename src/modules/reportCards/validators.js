@@ -1,4 +1,8 @@
 const ApiError = require('../../utils/ApiError');
+const {
+  GENERAL_COMMENTS_FIELDS, LEARNING_BEHAVIOUR_FIELDS, GROWTH_MINDSET_FIELDS,
+  validateProgressValues, validateCommentValues,
+} = require('./behaviorFields');
 
 const PROMOTION_STATUSES = ['PROMOTED', 'REPEATED', 'NOT_APPLICABLE'];
 
@@ -17,9 +21,27 @@ function validateClassSummaryQuery(req, res, next) {
 }
 
 function validateRemarksUpdate(req, res, next) {
-  const { promotionStatus } = req.body || {};
+  const {
+    promotionStatus, behaviorProgress, generalComments, learningBehaviourComments, growthMindsetComments,
+  } = req.body || {};
   if (promotionStatus !== undefined && !PROMOTION_STATUSES.includes(promotionStatus)) {
     return next(new ApiError(400, `promotionStatus must be one of: ${PROMOTION_STATUSES.join(', ')}`));
+  }
+  if (behaviorProgress !== undefined) {
+    const error = validateProgressValues(behaviorProgress);
+    if (error) return next(new ApiError(400, `behaviorProgress: ${error}`));
+  }
+  if (generalComments !== undefined) {
+    const error = validateCommentValues(generalComments, GENERAL_COMMENTS_FIELDS);
+    if (error) return next(new ApiError(400, `generalComments: ${error}`));
+  }
+  if (learningBehaviourComments !== undefined) {
+    const error = validateCommentValues(learningBehaviourComments, LEARNING_BEHAVIOUR_FIELDS);
+    if (error) return next(new ApiError(400, `learningBehaviourComments: ${error}`));
+  }
+  if (growthMindsetComments !== undefined) {
+    const error = validateCommentValues(growthMindsetComments, GROWTH_MINDSET_FIELDS);
+    if (error) return next(new ApiError(400, `growthMindsetComments: ${error}`));
   }
   return next();
 }

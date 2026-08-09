@@ -75,8 +75,12 @@ function dayLabel(dayOfWeek) {
 // empty cell has no row). staffId defaults to whatever SubjectTeacher says
 // for that class+subject, but the client may override it to any of the
 // class's own class teachers instead (e.g. a class teacher personally
-// covering a period) — anyone else is rejected. A teacher already booked
-// into another class at the same day+period blocks the whole save before
+// covering a period) — anyone else is rejected. A subject with no
+// SubjectTeacher on record for this class can still be scheduled as long as
+// the entry names one of the class's class teachers directly — this is what
+// lets a class with no subject teachers assigned yet (only a class teacher)
+// still build a timetable, and vice versa. A teacher already booked into
+// another class at the same day+period blocks the whole save before
 // anything is written.
 async function saveClassTimetable(schoolId, classId, entries) {
   const klass = await tenantScoped(Class, schoolId).findByPk(classId);
@@ -94,15 +98,22 @@ async function saveClassTimetable(schoolId, classId, entries) {
       where: { classId, subjectId: entry.subjectId },
       include: [Subject],
     });
-    if (!subjectTeacher) {
-      throw new ApiError(400, 'One of the selected subjects has no teacher assigned to this class yet — set it up in Teacher Assignments first.');
-    }
 
-    let { staffId } = subjectTeacher;
-    if (entry.staffId && entry.staffId !== staffId) {
-      if (!classTeacherIds.has(entry.staffId)) {
-        throw new ApiError(400, 'A slot\'s teacher must be either that subject\'s assigned teacher or one of this class\'s class teachers.');
+    let staffId;
+    if (subjectTeacher) {
+      ({ staffId } = subjectTeacher);
+      if (entry.staffId && entry.staffId !== staffId) {
+        if (!classTeacherIds.has(entry.staffId)) {
+          throw new ApiError(400, 'A slot\'s teacher must be either that subject\'s assigned teacher or one of this class\'s class teachers.');
+        }
+        staffId = entry.staffId;
       }
+    } else {
+      if (!entry.staffId || !classTeacherIds.has(entry.staffId)) {
+        throw new ApiError(400, 'This subject has no teacher assigned to this class yet — set it up in Teacher Assignments, or assign the slot to one of this class\'s class teachers.');
+      }
+      const subject = await tenantScoped(Subject, schoolId).findByPk(entry.subjectId);
+      if (!subject) throw new ApiError(400, 'Subject not found');
       staffId = entry.staffId;
     }
 

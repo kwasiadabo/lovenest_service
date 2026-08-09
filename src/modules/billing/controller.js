@@ -1,5 +1,6 @@
 const billingService = require('./service');
 const onboardingPaymentService = require('../onboarding/paymentService');
+const parentPortalService = require('../parentPortal/service');
 const { User } = require('../../models');
 
 async function listPlans(req, res, next) {
@@ -118,6 +119,7 @@ async function webhook(req, res, next) {
     const event = JSON.parse(rawBody.toString('utf8'));
     await billingService.handleWebhookEvent(event);
     await onboardingPaymentService.handleWebhookEvent(event);
+    await parentPortalService.handleFeePaymentWebhookEvent(event);
     return res.status(200).json({ received: true });
   } catch (err) {
     return next(err);

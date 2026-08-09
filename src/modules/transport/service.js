@@ -630,19 +630,24 @@ async function recordStudentDropoff(schoolId, userId, {
     : await tenantScoped(DropoffRecord, schoolId).create({ studentId, date, ...values });
 
   let notifications = { sms: { attempted: 0, sent: 0, failed: 0 }, email: { attempted: 0, sent: 0, failed: 0 } };
-  try {
-    const school = await School.findByPk(schoolId);
-    notifications = await notifyDropoff(schoolId, {
-      school,
-      studentId,
-      studentName: student.fullName,
-      vehicleName: vehicle.name,
-      droppedOffAt,
-      latitude: record.latitude,
-      longitude: record.longitude,
-    });
-  } catch (err) {
-    notifications.error = err.message;
+  // Only notify on the FIRST recording for this student+day — a re-tap to
+  // fix the GPS coordinates or correct a mistake updates the row but must
+  // not re-send the "was dropped off" parent SMS/email a second time.
+  if (!existing) {
+    try {
+      const school = await School.findByPk(schoolId);
+      notifications = await notifyDropoff(schoolId, {
+        school,
+        studentId,
+        studentName: student.fullName,
+        vehicleName: vehicle.name,
+        droppedOffAt,
+        latitude: record.latitude,
+        longitude: record.longitude,
+      });
+    } catch (err) {
+      notifications.error = err.message;
+    }
   }
 
   return { record, notifications };
@@ -1824,10 +1829,16 @@ async function getMyDriverVehicles(schoolId, userId) {
   });
 }
 
-// Rejects with 409 if a trip is already active for this vehicle — enforced
-// here rather than a DB constraint (see the vehicle_trips migration
-// comment). Fires the "bus has set off" alert right after creating the trip,
-// same call-site pattern as recordStudentDropoff firing notifyDropoff.
+// Rejects with 409 if a trip is already active for this vehicle. The
+// existingActive pre-check below is a fast, friendly path (avoids a DB
+// round-trip failing in the common case); the real guarantee is the
+// filtered unique index added in
+// 20260101000138-add-active-trip-unique-index-to-vehicle-trips.js — a
+// double-tap or retry that races past the pre-check still can't create a
+// second ACTIVE row, and the resulting unique-violation is caught below and
+// turned into the same 409. Fires the "bus has set off" alert right after
+// creating the trip, same call-site pattern as recordStudentDropoff firing
+// notifyDropoff.
 async function startTrip(schoolId, userId, vehicleId, tripType) {
   const resolvedTripType = tripType || 'PICKUP';
   if (!VehicleTrip.TRIP_TYPES.includes(resolvedTripType)) {
@@ -1841,13 +1852,19 @@ async function startTrip(schoolId, userId, vehicleId, tripType) {
   });
   if (existingActive) throw new ApiError(409, 'A trip is already active for this vehicle.');
 
-  const trip = await tenantScoped(VehicleTrip, schoolId).create({
-    vehicleId,
-    driverStaffId: staff.id,
-    status: 'ACTIVE',
-    tripType: resolvedTripType,
-    startedAt: new Date(),
-  });
+  let trip;
+  try {
+    trip = await tenantScoped(VehicleTrip, schoolId).create({
+      vehicleId,
+      driverStaffId: staff.id,
+      status: 'ACTIVE',
+      tripType: resolvedTripType,
+      startedAt: new Date(),
+    });
+  } catch (err) {
+    if (err.name !== 'SequelizeUniqueConstraintError') throw err;
+    throw new ApiError(409, 'A trip is already active for this vehicle.');
+  }
 
   const roster = await tenantScoped(StudentTransport, schoolId).findAll({
     where: { vehicleId, status: 'ENROLLED' },

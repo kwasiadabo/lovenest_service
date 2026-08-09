@@ -140,6 +140,20 @@ function validateBirthdayMessage(req, res, next) {
   return next();
 }
 
+function validateSelfDismissal(req, res, next) {
+  const { selfDismissalAuthorized, selfDismissalNote } = req.body || {};
+  if (typeof selfDismissalAuthorized !== 'boolean') {
+    return next(new ApiError(400, 'selfDismissalAuthorized must be true or false'));
+  }
+  if (selfDismissalNote !== undefined && selfDismissalNote !== null && typeof selfDismissalNote !== 'string') {
+    return next(new ApiError(400, 'selfDismissalNote must be a string'));
+  }
+  if (selfDismissalNote && selfDismissalNote.trim().length > 200) {
+    return next(new ApiError(400, 'selfDismissalNote must be 200 characters or fewer'));
+  }
+  return next();
+}
+
 module.exports = {
   validateStudent,
   validateStudentStatus,
@@ -151,4 +165,5 @@ module.exports = {
   validateGraduateStudents,
   validateRelationshipParam,
   validateBirthdayMessage,
+  validateSelfDismissal,
 };

@@ -24,4 +24,18 @@ const updateSignature = wrap(async (req, res) => {
   res.json(await schoolSettingsService.updateSignature(req.schoolId, signatureUrl));
 });
 
-module.exports = { getSettings, updateSettings, updateSignature };
+// Same req.body.remove/req.file convention as updateSignature above.
+const updateLogo = wrap(async (req, res) => {
+  let logoUrl;
+  if (req.body.remove === 'true') {
+    logoUrl = null;
+  } else if (req.file) {
+    const result = await uploadImageBuffer(req.file.buffer, { folder: 'school-logos' });
+    logoUrl = result.secure_url;
+  }
+  res.json(await schoolSettingsService.updateLogo(req.schoolId, logoUrl));
+});
+
+module.exports = {
+  getSettings, updateSettings, updateSignature, updateLogo,
+};

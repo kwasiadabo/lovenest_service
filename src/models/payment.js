@@ -25,6 +25,10 @@ module.exports = (sequelize, DataTypes) => {
     // case applySuccessfulPayment falls back to plan.durationDays for
     // expiry instead of a term's endDate. Never set for purpose:'training'.
     termId: { type: DataTypes.UUID, allowNull: true },
+    // Only set for purpose: 'fee_payment' — a parent paying a specific
+    // child's school-fee balance via parentPortal, as distinct from every
+    // other purpose here which is school-level (subscription/training).
+    studentId: { type: DataTypes.UUID, allowNull: true },
   }, {
     tableName: 'payments',
   });
@@ -32,6 +36,7 @@ module.exports = (sequelize, DataTypes) => {
   Payment.associate = (models) => {
     Payment.belongsTo(models.School, { foreignKey: 'schoolId' });
     Payment.belongsTo(models.Term, { foreignKey: 'termId' });
+    Payment.belongsTo(models.Student, { foreignKey: 'studentId' });
   };
 
   return Payment;

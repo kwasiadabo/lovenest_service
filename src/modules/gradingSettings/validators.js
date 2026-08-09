@@ -41,4 +41,22 @@ function validateClassworkSourceUpdate(req, res, next) {
   return next();
 }
 
-module.exports = { validateWeightsUpdate, validateGradeBandsUpdate, validateClassworkSourceUpdate };
+// DB-independent shape check only (both fields optional — undefined = leave
+// unchanged) — the 0-100 / positive-integer range checks live in
+// service.js#updateAssessmentSettings alongside the null-clears-it rule.
+function validateAssessmentSettingsUpdate(req, res, next) {
+  const { passMarkPercent, bestAggregateSubjectCount } = req.body || {};
+  if (passMarkPercent !== undefined && passMarkPercent !== null && passMarkPercent !== ''
+    && Number.isNaN(Number(passMarkPercent))) {
+    return next(new ApiError(400, 'passMarkPercent must be a number'));
+  }
+  if (bestAggregateSubjectCount !== undefined && bestAggregateSubjectCount !== null && bestAggregateSubjectCount !== ''
+    && Number.isNaN(Number(bestAggregateSubjectCount))) {
+    return next(new ApiError(400, 'bestAggregateSubjectCount must be a number'));
+  }
+  return next();
+}
+
+module.exports = {
+  validateWeightsUpdate, validateGradeBandsUpdate, validateClassworkSourceUpdate, validateAssessmentSettingsUpdate,
+};

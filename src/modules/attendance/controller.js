@@ -50,6 +50,14 @@ const getDailyOverview = wrap(async (req, res) => {
   res.json(await service.getDailyOverview(req.schoolId, { date: date || undefined }));
 });
 
+const getAttendanceSettings = wrap(async (req, res) => {
+  res.json(await service.getAttendanceSettings(req.schoolId));
+});
+
+const updateAttendanceSettings = wrap(async (req, res) => {
+  res.json(await service.updateAttendanceSettings(req.schoolId, req.body));
+});
+
 module.exports = {
   getMyClasses,
   getRegister,
@@ -60,4 +68,6 @@ module.exports = {
   getMyAnalytics,
   getMyRegisterStatus,
   getDailyOverview,
+  getAttendanceSettings,
+  updateAttendanceSettings,
 };

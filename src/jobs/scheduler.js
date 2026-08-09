@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { runSubscriptionReminderSweep } = require('../modules/billing/reminderService');
 const { runDailyRegisterReminderSweep } = require('../modules/attendance/service');
 const { runMonthlyBillingSweep } = require('../modules/financials/monthlyBillingScheduler');
+const { runMissedPickupSweep } = require('../modules/gateLog/service');
 
 // Daily at 07:00 Accra time — reminds tenants 14/3 days before expiry and
 // auto-suspends anyone still unpaid past their expiry date. See
@@ -38,6 +39,16 @@ function startScheduler() {
     runMonthlyBillingSweep().catch((err) => {
       // eslint-disable-next-line no-console
       console.error('[scheduler] monthly billing sweep failed:', err);
+    });
+  }, { timezone: 'Africa/Accra' });
+
+  // Every 15 min, 11:00–19:00 Accra time, Mon-Fri — broad enough to cover any
+  // school's own dismissal time (gateLogDismissalTime is per-school, not a
+  // fixed cutoff like the attendance reminder's 10am).
+  cron.schedule('*/15 11-19 * * 1-5', () => {
+    runMissedPickupSweep().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[scheduler] gate log missed-pickup sweep failed:', err);
     });
   }, { timezone: 'Africa/Accra' });
 }

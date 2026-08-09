@@ -1,5 +1,6 @@
 const STATUSES = ['ACTIVE', 'TRANSFERRED', 'WITHDRAWN', 'GRADUATED'];
 const DISCOUNT_TYPES = ['PERCENT', 'FLAT'];
+const APPLICANT_STATUSES = ['APPLIED', 'SHORTLISTED', 'REJECTED', 'ACCEPTED'];
 
 module.exports = (sequelize, DataTypes) => {
   const Student = sequelize.define('Student', {
@@ -41,6 +42,35 @@ module.exports = (sequelize, DataTypes) => {
     individualDiscountPercent: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
     individualDiscountFlatPesewas: { type: DataTypes.INTEGER, allowNull: true },
     individualDiscountReason: { type: DataTypes.STRING(200), allowNull: true },
+    // A deliberate safeguarding sign-off (see gateLog/service.js's
+    // missed-pickup sweep) that this child leaves school on their own — no
+    // adult pickup expected, so they must be excluded from the "not picked
+    // up yet" alert entirely. Kept as columns here rather than a row in
+    // AuthorizedPickupPerson: this is a dismissal *mode* for the child, not
+    // a person, and needs to be a cheap single-column filter across the
+    // whole school at once, distinct from "no pickup persons configured
+    // yet" (an incomplete record) vs. this (an intentional decision).
+    selfDismissalAuthorized: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    selfDismissalNote: { type: DataTypes.STRING(200), allowNull: true },
+    selfDismissalSetByUserId: { type: DataTypes.UUID, allowNull: true },
+    selfDismissalSetAt: { type: DataTypes.DATE, allowNull: true },
+    // Pre-enrollment applicant pipeline (see modules/admissions) — deliberately
+    // separate from the computed admissionStage in students/service.js
+    // (derived from class assignment + payment, never stored). null means
+    // this row isn't from the public pipeline, which is every existing
+    // student and every student the staff AdmissionPage wizard creates.
+    // APPLIED/SHORTLISTED/REJECTED are kept out of every normal list
+    // (students/service.js#listStudents) until admissions/service.js
+    // #acceptApplicant sets this to ACCEPTED — a permanent marker (not
+    // cleared to null) so a public applicant's origin and offer-letter
+    // verification survive the transition into ordinary enrollment, while
+    // still counting as "visible" everywhere null does.
+    applicantStatus: { type: DataTypes.ENUM(...APPLICANT_STATUSES), allowNull: true },
+    applicantSelfPhone: { type: DataTypes.STRING(30), allowNull: true },
+    applicantSelfEmail: { type: DataTypes.STRING, allowNull: true },
+    desiredClassLabel: { type: DataTypes.STRING(100), allowNull: true },
+    applicationNotes: { type: DataTypes.TEXT, allowNull: true },
+    applicationSubmittedAt: { type: DataTypes.DATE, allowNull: true },
   }, {
     tableName: 'students',
     indexes: [
@@ -52,6 +82,7 @@ module.exports = (sequelize, DataTypes) => {
 
   Student.STATUSES = STATUSES;
   Student.DISCOUNT_TYPES = DISCOUNT_TYPES;
+  Student.APPLICANT_STATUSES = APPLICANT_STATUSES;
 
   Student.associate = (models) => {
     Student.belongsTo(models.School, { foreignKey: 'schoolId' });
@@ -65,6 +96,9 @@ module.exports = (sequelize, DataTypes) => {
       foreignKey: 'studentId',
       otherKey: 'parentId',
     });
+    Student.belongsTo(models.User, { foreignKey: 'selfDismissalSetByUserId', as: 'selfDismissalSetBy' });
+    Student.hasMany(models.AuthorizedPickupPerson, { foreignKey: 'studentId' });
+    Student.hasMany(models.GateLogRecord, { foreignKey: 'studentId' });
   };
 
   return Student;

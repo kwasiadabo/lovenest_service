@@ -1,6 +1,8 @@
 const express = require('express');
 const controller = require('./controller');
-const { validateWeightsUpdate, validateGradeBandsUpdate, validateClassworkSourceUpdate } = require('./validators');
+const {
+  validateWeightsUpdate, validateGradeBandsUpdate, validateClassworkSourceUpdate, validateAssessmentSettingsUpdate,
+} = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requirePermission } = require('../../middleware/permissionGuard');
@@ -17,5 +19,11 @@ router.get('/grading-settings', controller.getGradingSettings);
 router.put('/grading-settings/weights', schoolAdminOnly, validateWeightsUpdate, controller.updateWeights);
 router.put('/grading-settings/grade-bands', schoolAdminOnly, validateGradeBandsUpdate, controller.updateGradeBands);
 router.put('/grading-settings/classwork-source', schoolAdminOnly, validateClassworkSourceUpdate, controller.updateClassworkSource);
+router.put(
+  '/grading-settings/assessment',
+  schoolAdminOnly,
+  validateAssessmentSettingsUpdate,
+  controller.updateAssessmentSettings,
+);
 
 module.exports = router;

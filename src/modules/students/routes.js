@@ -11,11 +11,13 @@ const {
   validateGraduateStudents,
   validateRelationshipParam,
   validateBirthdayMessage,
+  validateSelfDismissal,
 } = require('./validators');
 const { uploadStudentPhoto } = require('../../middleware/studentPhoto');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requirePermission } = require('../../middleware/permissionGuard');
+const { requireRole } = require('../../middleware/roleGuard');
 
 const router = express.Router();
 
@@ -34,6 +36,11 @@ const teacherOrAbove = requirePermission('students', 'VIEW');
 // section gating (health/incidents/academics/attendance) happens inside
 // fullHistory.js#sectionAccess, not here.
 const billingRoles = requirePermission('students', 'VIEW');
+// Hardcoded SCHOOL_ADMIN, not the customizable `students` permission matrix
+// — same treatment permissions.js gives the single most sensitive action in
+// other modules (ledger-admin journal entries, payroll approval, etc.),
+// since a wrong self-dismissal toggle has physical-safety consequences.
+const schoolAdminOnly = requireRole('SCHOOL_ADMIN');
 
 router.get('/students', adminOnly, controller.listStudents);
 router.get('/students/upcoming-birthdays', teacherOrAbove, controller.getUpcomingBirthdays);
@@ -45,6 +52,7 @@ router.patch('/students/:id', adminOnly, uploadStudentPhoto, validateStudent, co
 router.patch('/students/:id/status', adminOnly, validateStudentStatus, controller.setStudentStatus);
 router.post('/students/graduate', adminOnly, validateGraduateStudents, controller.graduateStudents);
 router.patch('/students/:id/discount', adminOnly, validateStudentDiscount, controller.setStudentDiscount);
+router.patch('/students/:id/self-dismissal', schoolAdminOnly, validateSelfDismissal, controller.setStudentSelfDismissal);
 router.post('/students/:id/admission-payment', adminOnly, validateAdmissionPayment, controller.recordAdmissionPayment);
 router.post(
   '/students/:id/parents/:relationship/create-login',

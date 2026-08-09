@@ -46,6 +46,10 @@ const saveExamScore = wrap(async (req, res) => {
   res.json(await service.saveExamScore(req.schoolId, req.auth.userId, req.auth.roles, req.body));
 });
 
+const updateExamScoreEffort = wrap(async (req, res) => {
+  res.json(await service.updateExamScoreEffort(req.schoolId, req.auth.userId, req.auth.roles, req.body));
+});
+
 const confirmExamScores = wrap(async (req, res) => {
   res.json(await service.confirmExamScores(req.schoolId, req.auth.userId, req.auth.roles, req.body));
 });
@@ -80,6 +84,7 @@ module.exports = {
   upsertScore,
   getExamGrid,
   saveExamScore,
+  updateExamScoreEffort,
   confirmExamScores,
   reopenExamScores,
   getExamAnalytics,

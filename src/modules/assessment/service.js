@@ -341,6 +341,7 @@ async function getExamGrid(schoolId, userId, roles, { classId, subjectId, termId
       examRaw: Number(row.examRaw),
       examScaled: Number(row.examScaled),
       totalScore: Number(row.totalScore),
+      effort: row.effort,
       updatedAt: row.updatedAt,
       recordedByName: row.recordedBy ? row.recordedBy.fullName : null,
       status: row.status,
@@ -367,7 +368,7 @@ async function getExamGrid(schoolId, userId, roles, { classId, subjectId, termId
 }
 
 async function saveExamScore(schoolId, userId, roles, {
-  classId, subjectId, termId, studentId, classworkRaw, examRaw, entryMode,
+  classId, subjectId, termId, studentId, classworkRaw, examRaw, entryMode, effort,
 }) {
   await assertScopeAccess(schoolId, {
     userId, roles, classId, subjectId,
@@ -429,7 +430,18 @@ async function saveExamScore(schoolId, userId, roles, {
 
   const staffMember = await tenantScoped(Staff, schoolId).findOne({ where: { userId } });
   const values = {
-    caPercent, caScaled, examRaw: examRawNum, examScaled, totalScore, recordedByStaffId: staffMember ? staffMember.id : null,
+    caPercent,
+    caScaled,
+    examRaw: examRawNum,
+    examScaled,
+    totalScore,
+    recordedByStaffId: staffMember ? staffMember.id : null,
+    // Only touched when the caller actually sent it (see
+    // updateExamScoreEffort below for the Effort select's own save path) —
+    // a routine classwork/exam save must never silently null out an
+    // already-set effort grade just because that field wasn't part of this
+    // particular request.
+    ...(effort !== undefined ? { effort: effort || null } : {}),
   };
 
   const existing = await tenantScoped(ExamScore, schoolId).findOne({
@@ -450,6 +462,33 @@ async function saveExamScore(schoolId, userId, roles, {
   // recordedByName isn't a column — attached here so the frontend can show
   // "who saved this" from the mutation response, without a second lookup.
   return { ...saved.toJSON(), recordedByName: staffMember ? staffMember.fullName : null };
+}
+
+// A separate, lightweight save path for the Effort select — deliberately
+// not folded into saveExamScore above, which recomputes/persists
+// caScaled/examScaled/totalScore from RAW/WEIGHTED entry-mode marks; an
+// effort-only save has none of that context (no classworkRaw/examRaw/
+// entryMode) and must never risk touching the score fields. Requires the
+// row to already exist (a teacher sets effort after marks, not before).
+async function updateExamScoreEffort(schoolId, userId, roles, {
+  classId, subjectId, termId, studentId, effort,
+}) {
+  await assertScopeAccess(schoolId, {
+    userId, roles, classId, subjectId,
+  });
+
+  const existing = await tenantScoped(ExamScore, schoolId).findOne({
+    where: {
+      classId, subjectId, termId, studentId,
+    },
+  });
+  if (!existing) throw new ApiError(400, 'Enter this student\'s classwork and exam marks before setting an effort grade.');
+  if (existing.status === 'CONFIRMED') {
+    throw new ApiError(400, 'This exam sheet has been confirmed and can no longer be edited. Ask a school admin to reopen it first.');
+  }
+
+  await existing.update({ effort: effort || null });
+  return existing.toJSON();
 }
 
 // Locks every currently-existing exam score row for a class+subject+term —
@@ -868,6 +907,7 @@ module.exports = {
   upsertScore,
   getExamGrid,
   saveExamScore,
+  updateExamScoreEffort,
   confirmExamScores,
   reopenExamScores,
   getExamAnalytics,

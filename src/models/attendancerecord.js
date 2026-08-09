@@ -10,7 +10,7 @@ module.exports = (sequelize, DataTypes) => {
     classId: { type: DataTypes.UUID, allowNull: false },
     termId: { type: DataTypes.UUID, allowNull: false },
     date: { type: DataTypes.DATEONLY, allowNull: false },
-    status: { type: DataTypes.ENUM('PRESENT', 'ABSENT'), allowNull: false },
+    status: { type: DataTypes.ENUM('PRESENT', 'ABSENT', 'LATE'), allowNull: false },
     markedByStaffId: { type: DataTypes.UUID, allowNull: true },
     notes: { type: DataTypes.STRING(200), allowNull: true },
   }, {

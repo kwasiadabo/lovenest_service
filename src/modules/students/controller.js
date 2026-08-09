@@ -62,6 +62,10 @@ const setStudentDiscount = wrap(async (req, res) => {
   res.json(await studentsService.setStudentDiscount(req.schoolId, req.params.id, req.body));
 });
 
+const setStudentSelfDismissal = wrap(async (req, res) => {
+  res.json(await studentsService.setStudentSelfDismissal(req.schoolId, req.params.id, req.auth.userId, req.body));
+});
+
 const recordAdmissionPayment = wrap(async (req, res) => {
   res.status(201).json(
     await studentsService.recordAdmissionPayment(req.schoolId, req.params.id, req.auth.userId, req.body),
@@ -145,6 +149,7 @@ module.exports = {
   updateStudent,
   setStudentStatus,
   setStudentDiscount,
+  setStudentSelfDismissal,
   recordAdmissionPayment,
   listClassAssignments,
   assignStudentToClass,

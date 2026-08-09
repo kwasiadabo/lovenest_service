@@ -53,6 +53,7 @@ const MODULES = [
   { key: 'driverOperations', label: 'Driver Operations', group: 'Transport' },
   { key: 'health', label: 'Health', group: 'Health & Discipline' },
   { key: 'incidents', label: 'Incidents', group: 'Health & Discipline' },
+  { key: 'gateLog', label: 'Gate Check-In/Check-Out', group: 'Health & Discipline' },
   { key: 'communications', label: 'Communications', group: 'Communications' },
   { key: 'schoolSettings', label: 'School Settings', group: 'Settings' },
 ];
@@ -143,6 +144,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
   },
   incidents: {
     ADMINISTRATOR: 'NONE', HEAD_TEACHER: 'CONTRIBUTE', TEACHER: 'NONE', ACCOUNTANT: 'NONE', DRIVER: 'NONE',
+  },
+  gateLog: {
+    ADMINISTRATOR: 'MANAGE', HEAD_TEACHER: 'VIEW', TEACHER: 'NONE', ACCOUNTANT: 'NONE', DRIVER: 'NONE',
   },
   communications: {
     ADMINISTRATOR: 'NONE', HEAD_TEACHER: 'MANAGE', TEACHER: 'NONE', ACCOUNTANT: 'NONE', DRIVER: 'NONE',

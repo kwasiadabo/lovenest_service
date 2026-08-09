@@ -4,6 +4,7 @@ const { sendSms } = require('../../utils/sms');
 
 const STATUS_LABELS = {
   PRESENT: 'present',
+  LATE: 'late',
   ABSENT: 'absent',
 };
 

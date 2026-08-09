@@ -13,6 +13,8 @@ router.use(authenticate, requireTenant, requireRole('PARENT'));
 router.get('/parent/children', controller.getChildren);
 router.get('/parent/children/:studentId/report-cards', validateReportCardQuery, controller.getReportCard);
 router.get('/parent/children/:studentId/bills', controller.getStudentBills);
+router.post('/parent/children/:studentId/bills/pay', controller.initializeFeePayment);
+router.get('/parent/billing/verify/:reference', controller.verifyFeePayment);
 router.get('/parent/children/:studentId/levies', controller.getStudentLevies);
 router.get('/parent/children/:studentId/financial-statement', controller.getFinancialStatement);
 router.get('/parent/children/:studentId/attendance', validateReportCardQuery, controller.getAttendance);

@@ -12,6 +12,7 @@ const subjectsRoutes = require('./modules/subjects/routes');
 const staffRoutes = require('./modules/staff/routes');
 const staffDocumentsRoutes = require('./modules/staffDocuments/routes');
 const staffAppraisalsRoutes = require('./modules/staffAppraisals/routes');
+const staffLeaveRoutes = require('./modules/staffLeave/routes');
 const studentsRoutes = require('./modules/students/routes');
 const feesRoutes = require('./modules/fees/routes');
 const financialsRoutes = require('./modules/financials/routes');
@@ -36,7 +37,9 @@ const activitiesRoutes = require('./modules/activities/routes');
 const notificationsRoutes = require('./modules/notifications/routes');
 const gradingSettingsRoutes = require('./modules/gradingSettings/routes');
 const attendanceRoutes = require('./modules/attendance/routes');
+const gateLogRoutes = require('./modules/gateLog/routes');
 const reportCardsRoutes = require('./modules/reportCards/routes');
+const reportCardsPublicRoutes = require('./modules/reportCards/publicRoutes');
 const parentPortalRoutes = require('./modules/parentPortal/routes');
 const announcementsRoutes = require('./modules/announcements/routes');
 const newslettersRoutes = require('./modules/newsletters/routes');
@@ -46,6 +49,8 @@ const healthRoutes = require('./modules/health/routes');
 const billingRoutes = require('./modules/billing/routes');
 const billingController = require('./modules/billing/controller');
 const onboardingRoutes = require('./modules/onboarding/routes');
+const admissionsRoutes = require('./modules/admissions/routes');
+const admissionsPublicRoutes = require('./modules/admissions/publicRoutes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -68,13 +73,20 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // More specific /api/v1/* prefixes must be registered before the bare
 // /api/v1 mount below — academicRoutes applies its auth middleware to every
-// path that reaches it, so if it were checked first it would shadow (and
-// 401) any other /api/v1/* route, including the intentionally public
-// onboarding endpoint.
+// path that reaches it (router.use(authenticate, ...) with no path matches
+// every sub-path of its mount, not just its own declared routes), so if a
+// more specific public prefix were checked after it, academicRoutes would
+// shadow it and 401 the request before it ever reached its real handler.
+// This bit reportCardsPublicRoutes and admissionsPublicRoutes for real
+// (empirically confirmed both 401'd before this fix) — every public,
+// unauthenticated /api/v1/public/* prefix must live in this block, not
+// mixed in further down near its sibling authenticated router.
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/platform', platformRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
+app.use('/api/v1/public/report-cards', reportCardsPublicRoutes);
+app.use('/api/v1/public/admissions', admissionsPublicRoutes);
 app.use('/api/v1', academicRoutes);
 app.use('/api/v1', usersRoutes);
 app.use('/api/v1', rolePermissionsRoutes);
@@ -83,6 +95,7 @@ app.use('/api/v1', subjectsRoutes);
 app.use('/api/v1', staffRoutes);
 app.use('/api/v1', staffDocumentsRoutes);
 app.use('/api/v1', staffAppraisalsRoutes);
+app.use('/api/v1', staffLeaveRoutes);
 app.use('/api/v1', studentsRoutes);
 app.use('/api/v1', feesRoutes);
 app.use('/api/v1', financialsRoutes);
@@ -107,7 +120,9 @@ app.use('/api/v1', activitiesRoutes);
 app.use('/api/v1', notificationsRoutes);
 app.use('/api/v1', gradingSettingsRoutes);
 app.use('/api/v1', attendanceRoutes);
+app.use('/api/v1', gateLogRoutes);
 app.use('/api/v1', reportCardsRoutes);
+app.use('/api/v1', admissionsRoutes);
 // announcementsRoutes must be mounted before parentPortalRoutes: the parent
 // router's requireRole('PARENT') guard is registered with no path prefix
 // (router.use(...), no leading path), so it runs for every request that
