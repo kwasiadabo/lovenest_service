@@ -129,6 +129,14 @@ async function getChildSubjectTrend(schoolId, userId, studentId, subjectId) {
   return assessmentService.computeStudentSubjectTrend(schoolId, { studentId, subjectId });
 }
 
+// All-subjects overview, optionally scoped to one academic year — powers
+// ChildSubjectsOverviewPage.jsx's "how's my child doing across the board"
+// screen, one level up from the single-subject deep-dive above.
+async function getChildAllSubjectsTrend(schoolId, userId, studentId, academicYearId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+  return assessmentService.getStudentAllSubjectsTrend(schoolId, { studentId, academicYearId });
+}
+
 async function getAttendance(schoolId, userId, studentId, termId) {
   await assertParentOwnsStudent(schoolId, userId, studentId);
   return attendanceService.getStudentAttendanceReport(schoolId, studentId, termId);
@@ -408,6 +416,7 @@ module.exports = {
   getReportCard,
   getChildSubjects,
   getChildSubjectTrend,
+  getChildAllSubjectsTrend,
   getStudentBills,
   getStudentLevies,
   getFinancialStatement,

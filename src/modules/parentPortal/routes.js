@@ -14,6 +14,7 @@ router.get('/parent/children', controller.getChildren);
 router.get('/parent/children/:studentId/report-cards', validateReportCardQuery, controller.getReportCard);
 router.get('/parent/children/:studentId/subjects', controller.getChildSubjects);
 router.get('/parent/children/:studentId/subject-trend', validateSubjectTrendQuery, controller.getChildSubjectTrend);
+router.get('/parent/children/:studentId/subjects-trend', controller.getChildAllSubjectsTrend);
 router.get('/parent/children/:studentId/bills', controller.getStudentBills);
 router.post('/parent/children/:studentId/bills/pay', controller.initializeFeePayment);
 router.get('/parent/billing/verify/:reference', controller.verifyFeePayment);

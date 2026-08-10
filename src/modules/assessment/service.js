@@ -838,22 +838,12 @@ async function getStudentSubjects(schoolId, studentId) {
 // getChildSubjectTrend (parent-owns-student, via assertParentOwnsStudent).
 // Exported so parentPortal reuses this instead of duplicating the
 // least-squares trend math.
-async function computeStudentSubjectTrend(schoolId, { studentId, subjectId }) {
-  const student = await tenantScoped(Student, schoolId).findByPk(studentId);
-  if (!student) throw new ApiError(404, 'Student not found');
-  const subject = await tenantScoped(Subject, schoolId).findByPk(subjectId);
-  if (!subject) throw new ApiError(404, 'Subject not found');
-
-  const gradingConfig = await resolveGradingConfig(schoolId);
-
-  const scores = await tenantScoped(ExamScore, schoolId).findAll({
-    where: { studentId, subjectId, status: 'CONFIRMED' },
-    include: [
-      { model: Term, include: [AcademicYear] },
-      { model: Class, include: [Level] },
-    ],
-  });
-
+//
+// The history-building + least-squares-slope math itself lives in
+// buildSubjectTrendHistory below, shared with getStudentAllSubjectsTrend —
+// that one needs the same computation per subject, from a single batched
+// query instead of one query per subject.
+function buildSubjectTrendHistory(scores, gradingConfig) {
   const history = scores
     .filter((score) => score.Term && score.Term.AcademicYear)
     .sort((a, b) => {
@@ -896,8 +886,6 @@ async function computeStudentSubjectTrend(schoolId, { studentId, subjectId }) {
   }
 
   return {
-    student: { id: student.id, fullName: student.fullName, studentNumber: student.studentNumber },
-    subject: { id: subject.id, name: subject.name },
     history,
     summary: {
       count: history.length,
@@ -914,6 +902,93 @@ async function computeStudentSubjectTrend(schoolId, { studentId, subjectId }) {
       trendDirection,
       slope: slope !== null ? Math.round(slope * 100) / 100 : null,
     },
+  };
+}
+
+async function computeStudentSubjectTrend(schoolId, { studentId, subjectId }) {
+  const student = await tenantScoped(Student, schoolId).findByPk(studentId);
+  if (!student) throw new ApiError(404, 'Student not found');
+  const subject = await tenantScoped(Subject, schoolId).findByPk(subjectId);
+  if (!subject) throw new ApiError(404, 'Subject not found');
+
+  const gradingConfig = await resolveGradingConfig(schoolId);
+
+  const scores = await tenantScoped(ExamScore, schoolId).findAll({
+    where: { studentId, subjectId, status: 'CONFIRMED' },
+    include: [
+      { model: Term, include: [AcademicYear] },
+      { model: Class, include: [Level] },
+    ],
+  });
+
+  const { history, summary } = buildSubjectTrendHistory(scores, gradingConfig);
+  return {
+    student: { id: student.id, fullName: student.fullName, studentNumber: student.studentNumber },
+    subject: { id: subject.id, name: subject.name },
+    history,
+    summary,
+  };
+}
+
+// Every subject at once, for one student, optionally restricted to a single
+// academic year ("this year" vs "all time") — a compact overview rather
+// than the single-subject deep-dive above, built for a parent-facing
+// "how's my child doing across the board" screen. One batched query (not
+// one per subject) grouped in memory, reusing the exact same trend math as
+// the single-subject path so the two views can never disagree with each
+// other on what "improving" means.
+async function getStudentAllSubjectsTrend(schoolId, { studentId, academicYearId }) {
+  const student = await tenantScoped(Student, schoolId).findByPk(studentId);
+  if (!student) throw new ApiError(404, 'Student not found');
+
+  let academicYear = null;
+  if (academicYearId) {
+    academicYear = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
+    if (!academicYear) throw new ApiError(404, 'Academic year not found');
+  }
+
+  const gradingConfig = await resolveGradingConfig(schoolId);
+
+  const scores = await tenantScoped(ExamScore, schoolId).findAll({
+    where: { studentId, status: 'CONFIRMED' },
+    include: [
+      Subject,
+      { model: Term, where: academicYearId ? { academicYearId } : undefined, include: [AcademicYear] },
+      { model: Class, include: [Level] },
+    ],
+  });
+
+  const scoresBySubject = new Map();
+  scores.forEach((score) => {
+    if (!score.Subject) return;
+    if (!scoresBySubject.has(score.subjectId)) scoresBySubject.set(score.subjectId, { subject: score.Subject, rows: [] });
+    scoresBySubject.get(score.subjectId).rows.push(score);
+  });
+
+  const subjects = [...scoresBySubject.values()]
+    .map(({ subject, rows }) => {
+      const { history, summary } = buildSubjectTrendHistory(rows, gradingConfig);
+      return { subject: { id: subject.id, name: subject.name }, history, summary };
+    })
+    .sort((a, b) => a.subject.name.localeCompare(b.subject.name));
+
+  const withData = subjects.filter((s) => s.summary.count > 0);
+  const overallSummary = {
+    subjectsCount: subjects.length,
+    improvingCount: subjects.filter((s) => s.summary.trendDirection === 'IMPROVING').length,
+    decliningCount: subjects.filter((s) => s.summary.trendDirection === 'DECLINING').length,
+    stableCount: subjects.filter((s) => s.summary.trendDirection === 'STABLE').length,
+    insufficientDataCount: subjects.filter((s) => s.summary.trendDirection === 'INSUFFICIENT_DATA').length,
+    overallAverage: withData.length > 0
+      ? Math.round((withData.reduce((sum, s) => sum + s.summary.averageScore, 0) / withData.length) * 10) / 10
+      : null,
+  };
+
+  return {
+    student: { id: student.id, fullName: student.fullName, studentNumber: student.studentNumber },
+    period: academicYear ? { academicYearId: academicYear.id, academicYearName: academicYear.name } : null,
+    overallSummary,
+    subjects,
   };
 }
 
@@ -945,6 +1020,7 @@ module.exports = {
   // Exported for parentPortal/service.js — see the file-level comments on
   // each for why the access check and the computation are split.
   computeStudentSubjectTrend,
+  getStudentAllSubjectsTrend,
   getStudentSubjects,
   // Exported for students/fullHistory.js's cross-subject aggregation, which
   // needs the same grade-band lookup this module already uses internally.
