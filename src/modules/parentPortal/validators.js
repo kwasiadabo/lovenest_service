@@ -11,4 +11,11 @@ function validateIssueCreate(req, res, next) {
   return next();
 }
 
-module.exports = { validateReportCardQuery, validateIssueCreate };
+function validateSubjectTrendQuery(req, res, next) {
+  if (!req.query.subjectId) return next(new ApiError(400, 'subjectId is required'));
+  return next();
+}
+
+module.exports = {
+  validateReportCardQuery, validateIssueCreate, validateSubjectTrendQuery,
+};

@@ -6,6 +6,7 @@ const {
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
 const reportCardsService = require('../reportCards/service');
+const assessmentService = require('../assessment/service');
 const financialsService = require('../financials/service');
 const leviesService = require('../levies/service');
 const attendanceService = require('../attendance/service');
@@ -108,6 +109,24 @@ async function getStudentLevies(schoolId, userId, studentId) {
 async function getFinancialStatement(schoolId, userId, studentId, { from, to } = {}) {
   await assertParentOwnsStudent(schoolId, userId, studentId);
   return financialsService.getStudentFinancialStatement(schoolId, studentId, { from, to });
+}
+
+// Subjects the child has at least one confirmed exam score in — feeds the
+// subject picker on ChildSubjectTrendPage.jsx, since a parent has no class/
+// teacher-assignment context to derive one from otherwise (unlike the
+// admin/teacher SubjectTrendPage, which uses fetchMyAssignments).
+async function getChildSubjects(schoolId, userId, studentId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+  return assessmentService.getStudentSubjects(schoolId, studentId);
+}
+
+// Same trend data (and least-squares IMPROVING/DECLINING/STABLE
+// classification) as the admin-facing SubjectTrendPage, just gated by
+// "is this my child" instead of "do I teach this class+subject" — see
+// assessment/service.js#computeStudentSubjectTrend for the shared core.
+async function getChildSubjectTrend(schoolId, userId, studentId, subjectId) {
+  await assertParentOwnsStudent(schoolId, userId, studentId);
+  return assessmentService.computeStudentSubjectTrend(schoolId, { studentId, subjectId });
 }
 
 async function getAttendance(schoolId, userId, studentId, termId) {
@@ -387,6 +406,8 @@ async function handleFeePaymentWebhookEvent(event) {
 module.exports = {
   getChildren,
   getReportCard,
+  getChildSubjects,
+  getChildSubjectTrend,
   getStudentBills,
   getStudentLevies,
   getFinancialStatement,

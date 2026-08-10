@@ -10,6 +10,14 @@ const getReportCard = wrap(async (req, res) => {
   res.json(await service.getReportCard(req.schoolId, req.auth.userId, req.params.studentId, req.query.termId));
 });
 
+const getChildSubjects = wrap(async (req, res) => {
+  res.json(await service.getChildSubjects(req.schoolId, req.auth.userId, req.params.studentId));
+});
+
+const getChildSubjectTrend = wrap(async (req, res) => {
+  res.json(await service.getChildSubjectTrend(req.schoolId, req.auth.userId, req.params.studentId, req.query.subjectId));
+});
+
 const getStudentBills = wrap(async (req, res) => {
   res.json(await service.getStudentBills(req.schoolId, req.auth.userId, req.params.studentId));
 });
@@ -92,6 +100,8 @@ const verifyFeePayment = wrap(async (req, res) => {
 module.exports = {
   getChildren,
   getReportCard,
+  getChildSubjects,
+  getChildSubjectTrend,
   getStudentBills,
   getStudentLevies,
   getFinancialStatement,

@@ -1,6 +1,6 @@
 const express = require('express');
 const controller = require('./controller');
-const { validateReportCardQuery, validateIssueCreate } = require('./validators');
+const { validateReportCardQuery, validateIssueCreate, validateSubjectTrendQuery } = require('./validators');
 const { validateMessageBody } = require('../issues/validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
@@ -12,6 +12,8 @@ router.use(authenticate, requireTenant, requireRole('PARENT'));
 
 router.get('/parent/children', controller.getChildren);
 router.get('/parent/children/:studentId/report-cards', validateReportCardQuery, controller.getReportCard);
+router.get('/parent/children/:studentId/subjects', controller.getChildSubjects);
+router.get('/parent/children/:studentId/subject-trend', validateSubjectTrendQuery, controller.getChildSubjectTrend);
 router.get('/parent/children/:studentId/bills', controller.getStudentBills);
 router.post('/parent/children/:studentId/bills/pay', controller.initializeFeePayment);
 router.get('/parent/billing/verify/:reference', controller.verifyFeePayment);

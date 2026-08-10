@@ -813,13 +813,32 @@ async function getMyExamAnalytics(schoolId, userId, roles, { academicYearId, ter
 // they've ever been scored in — not just the current year — so a teacher,
 // head teacher, or admin can see whether the student is improving or
 // declining, independent of which class they were in at the time (a student
-// who was promoted mid-history still shows one continuous line). `classId`
-// is used only for the scope check below (same convention as getExamGrid) —
-// a plain TEACHER must currently teach this class+subject pairing to view
-// it, even though the trend data itself spans classes.
-async function getStudentSubjectTrend(schoolId, userId, roles, { studentId, subjectId, classId }) {
-  await assertScopeAccess(schoolId, { userId, roles, classId, subjectId });
+// who was promoted mid-history still shows one continuous line).
 
+// Every subject a student has at least one CONFIRMED exam score in, across
+// any class/term on record — same dedupe-via-Map pattern as reportCards/
+// service.js#getClassSubjects, just keyed off one student instead of a
+// class+term. Exported for parentPortal/service.js, which has no class/
+// teacher-assignment context to derive a subject picker from otherwise.
+async function getStudentSubjects(schoolId, studentId) {
+  const rows = await tenantScoped(ExamScore, schoolId).findAll({
+    where: { studentId, status: 'CONFIRMED' },
+    include: [Subject],
+  });
+  const bySubjectId = new Map();
+  rows.forEach((row) => {
+    if (row.Subject && !bySubjectId.has(row.subjectId)) bySubjectId.set(row.subjectId, row.Subject);
+  });
+  return [...bySubjectId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// The actual trend computation — no access check of its own, since its two
+// callers need different ones: getStudentSubjectTrend below (teacher/admin
+// scope, via assertScopeAccess) and parentPortal/service.js#
+// getChildSubjectTrend (parent-owns-student, via assertParentOwnsStudent).
+// Exported so parentPortal reuses this instead of duplicating the
+// least-squares trend math.
+async function computeStudentSubjectTrend(schoolId, { studentId, subjectId }) {
   const student = await tenantScoped(Student, schoolId).findByPk(studentId);
   if (!student) throw new ApiError(404, 'Student not found');
   const subject = await tenantScoped(Subject, schoolId).findByPk(subjectId);
@@ -898,6 +917,16 @@ async function getStudentSubjectTrend(schoolId, userId, roles, { studentId, subj
   };
 }
 
+// Teacher/admin-facing entry point — `classId` is used only for the scope
+// check (same convention as getExamGrid), a plain TEACHER must currently
+// teach this class+subject pairing to view it, even though the trend data
+// itself (computeStudentSubjectTrend above) spans every class the student
+// has ever been in.
+async function getStudentSubjectTrend(schoolId, userId, roles, { studentId, subjectId, classId }) {
+  await assertScopeAccess(schoolId, { userId, roles, classId, subjectId });
+  return computeStudentSubjectTrend(schoolId, { studentId, subjectId });
+}
+
 module.exports = {
   getMyAssignments,
   getAssessmentGrid,
@@ -913,6 +942,10 @@ module.exports = {
   getExamAnalytics,
   getMyExamAnalytics,
   getStudentSubjectTrend,
+  // Exported for parentPortal/service.js — see the file-level comments on
+  // each for why the access check and the computation are split.
+  computeStudentSubjectTrend,
+  getStudentSubjects,
   // Exported for students/fullHistory.js's cross-subject aggregation, which
   // needs the same grade-band lookup this module already uses internally.
   resolveGrade,
