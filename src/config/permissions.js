@@ -38,6 +38,7 @@ const MODULES = [
   { key: 'activities', label: 'Pre-school Activities', group: 'Academics' },
   { key: 'attendance', label: 'Attendance', group: 'Academics' },
   { key: 'reportCards', label: 'Report Cards', group: 'Academics' },
+  { key: 'assessmentGrading', label: 'Ranking, Percentile & Stanine', group: 'Academics' },
   { key: 'dataImport', label: 'Data Import', group: 'Academics' },
   { key: 'accounting', label: 'Accounting', group: 'Finance' },
   { key: 'billing', label: 'Billing & Fee Payments', group: 'Finance' },
@@ -99,6 +100,9 @@ const DEFAULT_ROLE_PERMISSIONS = {
   },
   reportCards: {
     ADMINISTRATOR: 'NONE', HEAD_TEACHER: 'MANAGE', TEACHER: 'CONTRIBUTE', ACCOUNTANT: 'NONE', DRIVER: 'NONE',
+  },
+  assessmentGrading: {
+    ADMINISTRATOR: 'NONE', HEAD_TEACHER: 'MANAGE', TEACHER: 'VIEW', ACCOUNTANT: 'NONE', DRIVER: 'NONE',
   },
   dataImport: {
     ADMINISTRATOR: 'NONE', HEAD_TEACHER: 'NONE', TEACHER: 'NONE', ACCOUNTANT: 'NONE', DRIVER: 'NONE',
