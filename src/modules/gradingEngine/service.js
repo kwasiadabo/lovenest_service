@@ -617,6 +617,46 @@ async function getStudentStanine(schoolId, studentId, { termId, subjectId } = {}
   });
 }
 
+// One student's full relative-performance picture for a term, in exactly
+// two queries (not one per subject) — built for reportCards/service.js,
+// which needs every subject's percentile/Stanine plus the overall figure in
+// a single pass per student, not N+1 per-subject lookups. "Latest wins" per
+// subjectId, same rule as the single-row getStudentPercentile/Stanine above.
+async function getStudentRelativePerformance(schoolId, studentId, termId) {
+  const [percentileRows, stanineRows] = await Promise.all([
+    tenantScoped(PercentileResult, schoolId).findAll({
+      where: { studentId, termId },
+      order: [['createdAt', 'DESC']],
+    }),
+    tenantScoped(StanineResult, schoolId).findAll({
+      where: { studentId, termId },
+      order: [['createdAt', 'DESC']],
+    }),
+  ]);
+
+  const percentileBySubject = new Map();
+  let overallPercentile = null;
+  percentileRows.forEach((row) => {
+    const key = row.subjectId || 'OVERALL';
+    if (percentileBySubject.has(key)) return;
+    percentileBySubject.set(key, Number(row.percentile));
+    if (!row.subjectId) overallPercentile = Number(row.percentile);
+  });
+
+  const stanineBySubject = new Map();
+  let overallStanine = null;
+  stanineRows.forEach((row) => {
+    const key = row.subjectId || 'OVERALL';
+    if (stanineBySubject.has(key)) return;
+    stanineBySubject.set(key, row.stanine);
+    if (!row.subjectId) overallStanine = row.stanine;
+  });
+
+  return {
+    percentileBySubject, overallPercentile, stanineBySubject, overallStanine,
+  };
+}
+
 // Distribution across a class's roster, using each student's latest Stanine
 // row for the term/subject — powers a future "Stanine Distribution" chart
 // without needing its own persisted aggregate.
@@ -670,5 +710,6 @@ module.exports = {
   getStudentRanking,
   getStudentPercentile,
   getStudentStanine,
+  getStudentRelativePerformance,
   getClassStanineDistribution,
 };

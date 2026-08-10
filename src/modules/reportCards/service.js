@@ -6,6 +6,7 @@ const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
 const { resolveRoster } = require('../../utils/classRoster');
 const { resolveGradingConfig } = require('../gradingSettings/service');
+const gradingEngineService = require('../gradingEngine/service');
 const { assertClassScopeAccess } = require('../attendance/service');
 const attendanceService = require('../attendance/service');
 const activitiesService = require('../activities/service');
@@ -272,7 +273,7 @@ async function getOrDefaultRemarks(schoolId, studentId, termId) {
 // has already been resolved by the caller, so bulk generation
 // (getClassSummary) doesn't repeat that work once per student.
 async function buildReportCardPayload(schoolId, {
-  classId, termId, academicYearId, isEarlyYears, classSize, gradingConfig, subjects, ranking, subjectStats,
+  classId, termId, academicYearId, isEarlyYears, classSize, gradingConfig, subjects, ranking, subjectStats, scheme,
 }, studentId) {
   const student = await tenantScoped(Student, schoolId).findByPk(studentId);
   if (!student) throw new ApiError(404, 'Student not found');
@@ -310,6 +311,10 @@ async function buildReportCardPayload(schoolId, {
       subjectsFailed: null,
       bestAggregate: null,
       passMarkPercent: null,
+      overallPercentile: null,
+      overallStanine: null,
+      showPercentile: false,
+      showStanine: false,
       ...remarks,
     };
   }
@@ -326,6 +331,22 @@ async function buildReportCardPayload(schoolId, {
     subjectStats ? subjectStats.get(subject.id) : null,
     studentId,
   ));
+
+  // Relative-performance (Ranking/Percentile/Stanine) layer — additive on
+  // top of the CA/Exam grade above, gated by the active scheme's own
+  // display flags (see gradingEngine/service.js). No scheme, or a scheme
+  // with both flags off, means zero extra queries and every value stays
+  // null, matching the pre-existing report card shape exactly.
+  const showPercentile = !!(scheme && scheme.showPercentileOnReportCard);
+  const showStanine = !!(scheme && scheme.showStanineOnReportCard);
+  const relativePerformance = (showPercentile || showStanine)
+    ? await gradingEngineService.getStudentRelativePerformance(schoolId, studentId, termId)
+    : null;
+  const subjectRowsWithRelative = subjectRows.map((row) => ({
+    ...row,
+    percentile: relativePerformance ? (relativePerformance.percentileBySubject.get(row.subjectId) ?? null) : null,
+    stanine: relativePerformance ? (relativePerformance.stanineBySubject.get(row.subjectId) ?? null) : null,
+  }));
 
   const confirmedRows = subjectRows.filter((row) => !row.pending);
   const totalSubjects = confirmedRows.length;
@@ -359,7 +380,7 @@ async function buildReportCardPayload(schoolId, {
     termId,
     academicYearId,
     isEarlyYears: false,
-    subjects: subjectRows,
+    subjects: subjectRowsWithRelative,
     activityDomains: [],
     attendance,
     position: ranking.positions.get(studentId) ?? null,
@@ -370,6 +391,10 @@ async function buildReportCardPayload(schoolId, {
     subjectsFailed,
     bestAggregate,
     passMarkPercent: passMark ?? null,
+    overallPercentile: relativePerformance ? relativePerformance.overallPercentile : null,
+    overallStanine: relativePerformance ? relativePerformance.overallStanine : null,
+    showPercentile,
+    showStanine,
     ...remarks,
   };
 }
@@ -392,9 +417,10 @@ async function assembleReportCard(schoolId, studentId, termId) {
   const subjects = await getClassSubjects(schoolId, classId, termId);
   const ranking = await getClassRanking(schoolId, classId, termId);
   const subjectStats = await getSubjectStats(schoolId, classId, termId, subjects);
+  const scheme = await gradingEngineService.resolveActiveSchemeForLevel(schoolId, level?.id);
 
   return buildReportCardPayload(schoolId, {
-    classId, termId, academicYearId, isEarlyYears: false, gradingConfig, subjects, ranking, subjectStats,
+    classId, termId, academicYearId, isEarlyYears: false, gradingConfig, subjects, ranking, subjectStats, scheme,
   }, studentId);
 }
 
@@ -435,8 +461,9 @@ async function getClassSummary(schoolId, userId, roles, classId, termId) {
     const subjects = await getClassSubjects(schoolId, classId, termId);
     const ranking = await getClassRanking(schoolId, classId, termId);
     const subjectStats = await getSubjectStats(schoolId, classId, termId, subjects);
+    const scheme = await gradingEngineService.resolveActiveSchemeForLevel(schoolId, level?.id);
     context = {
-      classId, termId, academicYearId: term.academicYearId, isEarlyYears: false, gradingConfig, subjects, ranking, subjectStats,
+      classId, termId, academicYearId: term.academicYearId, isEarlyYears: false, gradingConfig, subjects, ranking, subjectStats, scheme,
     };
   }
 
