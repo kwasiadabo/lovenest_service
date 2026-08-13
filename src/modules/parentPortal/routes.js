@@ -30,6 +30,7 @@ router.get('/parent/children/:studentId/transport-history', controller.getTransp
 router.get('/parent/children/:studentId/live-transport', controller.getLiveTransport);
 router.get('/parent/announcements', controller.getAnnouncements);
 router.get('/parent/newsletters', controller.getNewsletters);
+router.get('/parent/sermons', controller.getSermons);
 router.get('/parent/issues', controller.listIssues);
 router.post('/parent/issues', validateIssueCreate, controller.createIssue);
 router.get('/parent/issues/:id', controller.getIssue);

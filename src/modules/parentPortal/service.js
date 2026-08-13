@@ -13,6 +13,7 @@ const attendanceService = require('../attendance/service');
 const activitiesService = require('../activities/service');
 const announcementsService = require('../announcements/service');
 const newslettersService = require('../newsletters/service');
+const sermonsService = require('../sermons/service');
 const issuesService = require('../issues/service');
 const incidentsService = require('../incidents/service');
 const healthService = require('../health/service');
@@ -156,6 +157,10 @@ async function getAnnouncements(schoolId) {
 
 async function getNewsletters(schoolId) {
   return newslettersService.listPublished(schoolId);
+}
+
+async function getSermons(schoolId) {
+  return sermonsService.listPublished(schoolId);
 }
 
 // Incidents/disciplinary actions and health records are otherwise
@@ -424,6 +429,7 @@ module.exports = {
   getDailyActivities,
   getAnnouncements,
   getNewsletters,
+  getSermons,
   createIssue,
   listIssues,
   getIssue,

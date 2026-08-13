@@ -42,6 +42,9 @@ const reportCardsRoutes = require('./modules/reportCards/routes');
 const reportCardsPublicRoutes = require('./modules/reportCards/publicRoutes');
 const parentPortalRoutes = require('./modules/parentPortal/routes');
 const announcementsRoutes = require('./modules/announcements/routes');
+const announcementsPublicRoutes = require('./modules/announcements/publicRoutes');
+const sermonsRoutes = require('./modules/sermons/routes');
+const sermonsPublicRoutes = require('./modules/sermons/publicRoutes');
 const newslettersRoutes = require('./modules/newsletters/routes');
 const issuesRoutes = require('./modules/issues/routes');
 const incidentsRoutes = require('./modules/incidents/routes');
@@ -72,6 +75,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/public/report-cards', reportCardsPublicRoutes);
 app.use('/api/v1/public/admissions', admissionsPublicRoutes);
+app.use('/api/v1/public/announcements', announcementsPublicRoutes);
+app.use('/api/v1/public/sermons', sermonsPublicRoutes);
 app.use('/api/v1', academicRoutes);
 app.use('/api/v1', usersRoutes);
 app.use('/api/v1', rolePermissionsRoutes);
@@ -116,6 +121,7 @@ app.use('/api/v1', admissionsRoutes);
 // thrown 403 short-circuits past every router mounted after it. Any router
 // meant for non-parent roles has to be mounted earlier in this list.
 app.use('/api/v1', announcementsRoutes);
+app.use('/api/v1', sermonsRoutes);
 app.use('/api/v1', newslettersRoutes);
 app.use('/api/v1', issuesRoutes);
 app.use('/api/v1', incidentsRoutes);

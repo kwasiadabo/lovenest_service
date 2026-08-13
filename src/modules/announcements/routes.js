@@ -4,6 +4,7 @@ const { validateAnnouncement } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
 const { requirePermission } = require('../../middleware/permissionGuard');
+const { uploadImages } = require('../../middleware/multiImageUpload');
 
 const router = express.Router();
 
@@ -14,8 +15,10 @@ router.use(authenticate, requireTenant);
 const manageRoles = requirePermission('communications', 'MANAGE');
 
 router.get('/announcements', manageRoles, controller.list);
-router.post('/announcements', manageRoles, validateAnnouncement, controller.create);
-router.patch('/announcements/:id', manageRoles, validateAnnouncement, controller.update);
+// uploadImages must run before validateAnnouncement — it's what parses the
+// multipart body into req.body/req.files in the first place.
+router.post('/announcements', manageRoles, uploadImages, validateAnnouncement, controller.create);
+router.patch('/announcements/:id', manageRoles, uploadImages, validateAnnouncement, controller.update);
 router.delete('/announcements/:id', manageRoles, controller.remove);
 
 module.exports = router;

@@ -5,10 +5,10 @@ const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 function payload(req, images) {
   const {
-    title, body, ctaLabel, ctaUrl, startDate, endDate,
+    title, scripture, speaker, body, date, ctaLabel, ctaUrl,
   } = req.body;
   return {
-    title, body, images, ctaLabel, ctaUrl, startDate, endDate,
+    title, scripture, speaker, body, date, images, ctaLabel, ctaUrl,
   };
 }
 
@@ -17,12 +17,12 @@ const list = wrap(async (req, res) => {
 });
 
 const create = wrap(async (req, res) => {
-  const images = await resolveImageUrls(req, 'announcements');
+  const images = await resolveImageUrls(req, 'sermons');
   res.status(201).json(await service.create(req.schoolId, req.auth.userId, payload(req, images)));
 });
 
 const update = wrap(async (req, res) => {
-  const images = await resolveImageUrls(req, 'announcements');
+  const images = await resolveImageUrls(req, 'sermons');
   res.json(await service.update(req.schoolId, req.params.id, payload(req, images)));
 });
 

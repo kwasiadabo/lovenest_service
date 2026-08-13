@@ -53,6 +53,10 @@ const getNewsletters = wrap(async (req, res) => {
   res.json(await service.getNewsletters(req.schoolId));
 });
 
+const getSermons = wrap(async (req, res) => {
+  res.json(await service.getSermons(req.schoolId));
+});
+
 const createIssue = wrap(async (req, res) => {
   const { studentId, subject, body } = req.body;
   res.status(201).json(await service.createIssue(req.schoolId, req.auth.userId, { studentId, subject, body }));
@@ -116,6 +120,7 @@ module.exports = {
   getDailyActivities,
   getAnnouncements,
   getNewsletters,
+  getSermons,
   createIssue,
   listIssues,
   getIssue,
