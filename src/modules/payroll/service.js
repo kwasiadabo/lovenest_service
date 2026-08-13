@@ -388,35 +388,63 @@ async function getMyPayslip(schoolId, userId, payslipId) {
   return payslip;
 }
 
-// ---- Statutory settings (read-only view of where SSNIT/PAYE are configured) ----
-// SSNIT rates are simple enough to live as named constants (utils/ghanaPaye.js);
-// PAYE bands are platform-level seeded data (paye_tax_bands table, NOT
-// schoolId-scoped — GRA bands are national). This just surfaces both so an
-// accountant can see what a payroll run actually used, without making them
-// editable here (a rate change ships as a new seeder row/constant update,
-// not a per-tenant UI edit — see the seeders/ comment).
-async function getStatutorySettings() {
-  const bands = await PayeTaxBand.findAll({ order: [['effectiveFrom', 'DESC'], ['bandOrder', 'ASC']] });
-  const latestEffectiveFrom = bands[0]?.effectiveFrom || null;
+// ---- Statutory settings: SSNIT rate + PAYE tax bands ----
+// National data shared by every payroll run (see models/ssnitrate.js,
+// models/payetaxband.js), NOT schoolId-scoped. "Editing" always means
+// inserting a new row with a fresh effectiveFrom date rather than mutating
+// an existing one, so a rate change here never retroactively changes a
+// payslip that was already computed under the old rate (see utils/ghanaPaye.js).
 
+async function getStatutorySettings() {
   const ssnitRates = await SsnitRate.findAll({ order: [['effectiveFrom', 'DESC']] });
-  const currentSsnit = ssnitRates[0];
+  const latestSsnitEffectiveFrom = ssnitRates[0]?.effectiveFrom || null;
+
+  const bands = await PayeTaxBand.findAll({ order: [['effectiveFrom', 'DESC'], ['bandOrder', 'ASC']] });
+  const latestBandEffectiveFrom = bands[0]?.effectiveFrom || null;
+  const bandsByDate = new Map();
+  bands.forEach((b) => {
+    if (!bandsByDate.has(b.effectiveFrom)) bandsByDate.set(b.effectiveFrom, []);
+    bandsByDate.get(b.effectiveFrom).push(b);
+  });
 
   return {
-    ssnit: {
-      employeeRatePercent: currentSsnit ? Number(currentSsnit.employeeRatePercent) : 0,
-      employerRatePercent: currentSsnit ? Number(currentSsnit.employerRatePercent) : 0,
-      effectiveFrom: currentSsnit?.effectiveFrom || null,
-    },
-    payeTaxBands: bands.map((b) => ({
-      id: b.id,
-      effectiveFrom: b.effectiveFrom,
-      bandOrder: b.bandOrder,
-      upToPesewas: b.upToPesewas,
-      ratePercent: Number(b.ratePercent),
-      isActive: b.effectiveFrom === latestEffectiveFrom,
+    ssnitRates: ssnitRates.map((r) => ({
+      id: r.id,
+      effectiveFrom: r.effectiveFrom,
+      employeeRatePercent: Number(r.employeeRatePercent),
+      employerRatePercent: Number(r.employerRatePercent),
+      isActive: r.effectiveFrom === latestSsnitEffectiveFrom,
+    })),
+    payeTaxBandSets: Array.from(bandsByDate.entries()).map(([effectiveFrom, rows]) => ({
+      effectiveFrom,
+      isActive: effectiveFrom === latestBandEffectiveFrom,
+      bands: rows
+        .sort((a, b) => a.bandOrder - b.bandOrder)
+        .map((b) => ({ id: b.id, bandOrder: b.bandOrder, upToPesewas: b.upToPesewas, ratePercent: Number(b.ratePercent) })),
     })),
   };
+}
+
+async function setSsnitRate({ employeeRatePercent, employerRatePercent, effectiveFrom }) {
+  const existing = await SsnitRate.findOne({ where: { effectiveFrom } });
+  if (existing) throw new ApiError(409, `An SSNIT rate effective ${effectiveFrom} already exists`);
+  return SsnitRate.create({ employeeRatePercent, employerRatePercent, effectiveFrom });
+}
+
+async function setPayeTaxBands({ effectiveFrom, bands }) {
+  return sequelize.transaction(async (t) => {
+    const existing = await PayeTaxBand.count({ where: { effectiveFrom }, transaction: t });
+    if (existing > 0) throw new ApiError(409, `A PAYE tax band set effective ${effectiveFrom} already exists`);
+    return PayeTaxBand.bulkCreate(
+      bands.map((b, i) => ({
+        effectiveFrom,
+        bandOrder: i + 1,
+        upToPesewas: b.upToPesewas === undefined ? null : b.upToPesewas,
+        ratePercent: b.ratePercent,
+      })),
+      { transaction: t },
+    );
+  });
 }
 
 // ---- Analytics ----
@@ -571,5 +599,7 @@ module.exports = {
   listMyPayslips,
   getMyPayslip,
   getStatutorySettings,
+  setSsnitRate,
+  setPayeTaxBands,
   getPayrollAnalytics,
 };

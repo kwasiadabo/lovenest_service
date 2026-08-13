@@ -6,6 +6,11 @@ const { randomUUID } = require('crypto');
 // the students/parents/assignments this seeder created without touching real data.
 const MARKER = 'seed:demo-students-2026';
 
+// Flat admission fee (GHS 500) for every seeded student's AdmissionPayment —
+// real amounts are set per level on the Fees setup page; this is just enough
+// to mark the fee as paid so the Directory shows them as fully admitted.
+const ADMISSION_FEE_PESEWAS = 50000;
+
 const MALE_FIRST_NAMES = [
   'Kwame', 'Kofi', 'Kwabena', 'Kwesi', 'Yaw', 'Kwaku', 'Kwadwo', 'Elvis', 'Emmanuel', 'Michael',
   'Daniel', 'Samuel', 'Isaac', 'Prince', 'Eric', 'Solomon', 'Bernard', 'Richard', 'Francis', 'Nana Yaw',
@@ -62,6 +67,20 @@ module.exports = {
       WHERE c.schoolId = :schoolId
     `, { replacements: { schoolId: school.schoolId }, type: queryInterface.sequelize.QueryTypes.SELECT });
 
+    // Every seeded student should read as having gone through the full
+    // admission pipeline in the Directory (admissionStageFor in
+    // students/service.js needs both a class assignment — already given
+    // below — and an AdmissionPayment row to land on ADMITTED, the
+    // "Fully admitted" badge, instead of stalling at the CLASS_ASSIGNED
+    // "Admitted" one). cashAccountId is left null (same as any pre-ledger
+    // historical payment — see models/admissionpayment.js) since no cash
+    // account is seeded by default; the Directory only checks for the
+    // payment row's existence, not its GL posting.
+    const [[admissionFeeType]] = await queryInterface.sequelize.query(`
+      SELECT TOP 1 id FROM fee_types WHERE schoolId = :schoolId AND category = 'ADMISSION'
+    `, { replacements: { schoolId: school.schoolId } });
+    if (!admissionFeeType) throw new Error('No ADMISSION fee type found for this school — run the school seeder first');
+
     const [[{ studentCount }]] = await queryInterface.sequelize.query(
       'SELECT COUNT(*) AS studentCount FROM students WHERE schoolId = :schoolId',
       { replacements: { schoolId: school.schoolId } },
@@ -79,10 +98,12 @@ module.exports = {
     const assignmentRows = [];
     const parentRows = [];
     const studentParentRows = [];
+    const admissionPaymentRows = [];
+    const admissionPaymentItemRows = [];
 
     for (const klass of classes) {
       const [minAge, maxAge] = LEVEL_AGE_RANGES[klass.levelName] || [6, 15];
-      const targetCount = randomInt(10, 15);
+      const targetCount = 10;
 
       for (let i = 0; i < targetCount; i += 1) {
         const gender = Math.random() < 0.5 ? 'MALE' : 'FEMALE';
@@ -146,6 +167,30 @@ module.exports = {
           createdAt: now,
           updatedAt: now,
         });
+
+        const admissionPaymentId = randomUUID();
+        admissionPaymentRows.push({
+          id: admissionPaymentId,
+          schoolId: school.schoolId,
+          studentId,
+          amountPesewas: ADMISSION_FEE_PESEWAS,
+          method: 'CASH',
+          reference: null,
+          paidDate: admissionDate,
+          notes: MARKER,
+          cashAccountId: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        admissionPaymentItemRows.push({
+          id: randomUUID(),
+          schoolId: school.schoolId,
+          admissionPaymentId,
+          feeTypeId: admissionFeeType.id,
+          amountPesewas: ADMISSION_FEE_PESEWAS,
+          createdAt: now,
+          updatedAt: now,
+        });
       }
     }
 
@@ -153,6 +198,8 @@ module.exports = {
     await queryInterface.bulkInsert('parents', parentRows);
     await queryInterface.bulkInsert('student_parents', studentParentRows);
     await queryInterface.bulkInsert('student_class_assignments', assignmentRows);
+    await queryInterface.bulkInsert('admission_payments', admissionPaymentRows);
+    await queryInterface.bulkInsert('admission_payment_items', admissionPaymentItemRows);
   },
 
   down: async (queryInterface) => {
@@ -177,6 +224,14 @@ module.exports = {
       DELETE FROM student_class_assignments
       WHERE studentId IN (SELECT id FROM students WHERE statusNote = :marker)
     `, { replacements: { marker: MARKER } });
+    await queryInterface.sequelize.query(`
+      DELETE FROM admission_payment_items
+      WHERE admissionPaymentId IN (SELECT id FROM admission_payments WHERE notes = :marker)
+    `, { replacements: { marker: MARKER } });
+    await queryInterface.sequelize.query(
+      'DELETE FROM admission_payments WHERE notes = :marker',
+      { replacements: { marker: MARKER } },
+    );
     await queryInterface.sequelize.query(
       'DELETE FROM students WHERE statusNote = :marker',
       { replacements: { marker: MARKER } },

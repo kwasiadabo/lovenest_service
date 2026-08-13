@@ -1,11 +1,10 @@
 'use strict';
 const { randomUUID } = require('crypto');
 
-// Platform-level (not per-school) — see models/ssnitrate.js. IMPORTANT:
-// verify/update against the current SSNIT schedule before relying on this
-// for real payroll; a rate change ships as a new row with a fresh
-// effectiveFrom date (see modules/platform/service.js#setSsnitRate), never
-// an edit to this one.
+// Not per-school — see models/ssnitrate.js. IMPORTANT: verify/update against
+// the current SSNIT schedule before relying on this for real payroll; a rate
+// change ships as a new row with a fresh effectiveFrom date (see
+// modules/payroll/service.js#setSsnitRate), never an edit to this one.
 const EFFECTIVE_FROM = '2024-01-01';
 
 module.exports = {

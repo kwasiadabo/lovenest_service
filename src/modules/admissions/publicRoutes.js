@@ -24,6 +24,7 @@ const verifyLimiter = rateLimit({
   message: { error: 'Too many verification attempts. Please try again later.' },
 });
 
+router.get('/:schoolCode', controller.getSchoolInfo);
 router.post('/:schoolCode/apply', applyLimiter, uploadStudentPhoto, controller.submitApplication);
 router.get('/applicants/:id/verify', verifyLimiter, controller.verifyApplicant);
 

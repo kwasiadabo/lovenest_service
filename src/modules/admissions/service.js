@@ -12,6 +12,22 @@ async function resolveSchoolByCode(schoolCode) {
   return school;
 }
 
+// Public, unauthenticated — just the display fields the branded login page
+// and this apply page itself need (name/logo/brand colors), never anything
+// else on School. Used instead of a hardcoded frontend constant so a
+// school-admin's own branding edits (schoolSettings module) show up here
+// without a frontend deploy.
+async function getPublicSchoolInfo(schoolCode) {
+  const school = await resolveSchoolByCode(schoolCode);
+  return {
+    name: school.name,
+    code: school.code,
+    logoUrl: school.logoUrl,
+    brandColor: school.brandColor,
+    brandColorSecondary: school.brandColorSecondary,
+  };
+}
+
 function requireApplicationFields({
   firstName, lastName, gender, dateOfBirth, father, mother, emergencyContactName, emergencyContactPhone,
 }) {
@@ -150,4 +166,5 @@ module.exports = {
   rejectApplicant,
   acceptApplicant,
   getPublicApplicantVerification,
+  getPublicSchoolInfo,
 };

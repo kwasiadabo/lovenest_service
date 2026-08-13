@@ -1,6 +1,6 @@
-// Platform-level, deliberately NOT schoolId-scoped — SSNIT contribution
-// rates are national, not per-school. A rate change is a new row with a
-// fresh effectiveFrom date (see modules/platform), never an edit to an
+// Deliberately NOT schoolId-scoped — SSNIT contribution rates are national,
+// not per-school. A rate change is a new row with a fresh effectiveFrom date
+// (see modules/payroll/service.js#setSsnitRate), never an edit to an
 // existing one — old payroll runs keep using whichever rate was active
 // when they ran (see utils/ghanaPaye.js#getSsnitRates).
 module.exports = (sequelize, DataTypes) => {

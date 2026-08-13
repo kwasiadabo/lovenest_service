@@ -3,7 +3,6 @@ const {
 } = require('../../models');
 const tenantScoped = require('../../utils/tenantScopedModel');
 const ApiError = require('../../utils/ApiError');
-const { handleTermIndebtedness } = require('../billing/termBillingService');
 
 const USER_SUMMARY_ATTRIBUTES = ['id', 'fullName', 'email'];
 
@@ -52,15 +51,8 @@ async function setCurrentAcademicYear(schoolId, academicYearId, userId, reason) 
   const year = await tenantScoped(AcademicYear, schoolId).findByPk(academicYearId);
   if (!year) throw new ApiError(404, 'Academic year not found');
 
-  let vacatedTerm = null;
-  const result = await sequelize.transaction(async (t) => {
+  return sequelize.transaction(async (t) => {
     const previous = await tenantScoped(AcademicYear, schoolId).findOne({
-      where: { isCurrent: true }, transaction: t,
-    });
-    // The academic-year switch doesn't touch Term.isCurrent — whatever term
-    // is current right now is the last term of the outgoing year, i.e. the
-    // one billing/termBillingService.js needs to check for indebtedness.
-    vacatedTerm = await tenantScoped(Term, schoolId).findOne({
       where: { isCurrent: true }, transaction: t,
     });
 
@@ -80,18 +72,6 @@ async function setCurrentAcademicYear(schoolId, academicYearId, userId, reason) 
 
     return year;
   });
-
-  // Never blocks or throws back to the caller — a new academic year starts
-  // regardless of indebtedness; this only notifies the admin/headmaster and
-  // starts the 14-day grace clock if it isn't already running.
-  try {
-    await handleTermIndebtedness(schoolId, vacatedTerm);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[academic] term indebtedness check failed:', err);
-  }
-
-  return result;
 }
 
 // ---- Terms ----
@@ -165,17 +145,6 @@ async function setCurrentTerm(schoolId, termId, userId, reason) {
 
     return term;
   });
-
-  // Never blocks or throws back to the caller — the transition always
-  // succeeds; this only notifies the admin/headmaster and starts the
-  // 14-day grace clock if the vacated term went unpaid and one isn't
-  // already running (billing/termBillingService.js#handleTermIndebtedness).
-  try {
-    await handleTermIndebtedness(schoolId, vacatedTerm);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[academic] term indebtedness check failed:', err);
-  }
 
   return result;
 }

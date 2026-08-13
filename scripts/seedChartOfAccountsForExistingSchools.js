@@ -1,8 +1,8 @@
 /**
- * One-time backfill for schools created before the accounting subsystem
- * shipped — onboarding/service.js and platform/service.js only seed a
- * Chart of Accounts for *new* schools going forward. Idempotent: skips any
- * school that already has at least one Account row.
+ * One-time backfill for a school created before the accounting subsystem
+ * shipped — the seeders/ only seed a Chart of Accounts for a *new* school
+ * going forward. Idempotent: skips any school that already has at least
+ * one Account row.
  *
  * Usage: node scripts/seedChartOfAccountsForExistingSchools.js
  */

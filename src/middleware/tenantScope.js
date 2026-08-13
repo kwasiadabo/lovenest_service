@@ -12,13 +12,4 @@ function requireTenant(req, res, next) {
   return next();
 }
 
-// Route guard for the platform/SuperAdmin namespace: rejects school-scoped
-// tokens so tenant users can never reach cross-tenant routes.
-function requirePlatform(req, res, next) {
-  if (!req.auth || req.auth.schoolId) {
-    return next(new ApiError(403, 'This endpoint requires a platform account'));
-  }
-  return next();
-}
-
-module.exports = { requireTenant, requirePlatform };
+module.exports = { requireTenant };

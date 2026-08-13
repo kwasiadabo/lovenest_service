@@ -2,8 +2,9 @@ const request = require('supertest');
 const app = require('../../src/app');
 const { createTestSchool, cleanupSchool } = require('../helpers/testFixtures');
 
-// Public, unauthenticated branding lookup backing /s/:schoolCode/login.
-describe('GET /api/v1/onboarding/schools/:code (public branding lookup)', () => {
+// Public, unauthenticated branding lookup backing /s/:schoolCode/login and
+// the admissions apply page — see modules/admissions/service.js#getPublicSchoolInfo.
+describe('GET /api/v1/public/admissions/:code (public branding lookup)', () => {
   let school;
   let suspendedSchool;
 
@@ -18,14 +19,15 @@ describe('GET /api/v1/onboarding/schools/:code (public branding lookup)', () => 
   });
 
   test('a real, non-suspended school\'s code returns only safe public fields, no auth required', async () => {
-    const res = await request(app).get(`/api/v1/onboarding/schools/${school.school.code}`);
+    const res = await request(app).get(`/api/v1/public/admissions/${school.school.code}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      id: school.school.id,
       code: school.school.code,
       name: school.school.name,
       logoUrl: null,
+      brandColor: null,
+      brandColorSecondary: null,
     });
     // No sensitive fields (email/phone/billing/etc.) should ever appear here.
     expect(res.body).not.toHaveProperty('email');
@@ -35,12 +37,12 @@ describe('GET /api/v1/onboarding/schools/:code (public branding lookup)', () => 
   });
 
   test('an unknown code returns 404', async () => {
-    const res = await request(app).get('/api/v1/onboarding/schools/ZZZ-NOPE');
+    const res = await request(app).get('/api/v1/public/admissions/ZZZ-NOPE');
     expect(res.status).toBe(404);
   });
 
   test('a suspended school\'s code also returns 404 (not publicly discoverable)', async () => {
-    const res = await request(app).get(`/api/v1/onboarding/schools/${suspendedSchool.school.code}`);
+    const res = await request(app).get(`/api/v1/public/admissions/${suspendedSchool.school.code}`);
     expect(res.status).toBe(404);
   });
 });

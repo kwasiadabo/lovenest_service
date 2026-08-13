@@ -5,9 +5,7 @@ const {
 describe('levies/service.js period math (pure helpers)', () => {
   describe('periodsElapsed', () => {
     // schoolId is irrelevant for every branch below except TERMLY, which
-    // isn't exercised here (it needs a real Term row — covered indirectly
-    // by tests/integration/billing.termly.test.js's equivalent TERMLY
-    // accrual check).
+    // isn't exercised here (it needs a real Term row).
     const schoolId = 'unused';
 
     test('ONE_TIME always returns 0 (unused by that frequency)', async () => {

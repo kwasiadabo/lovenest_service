@@ -55,4 +55,8 @@ const verifyApplicant = wrap(async (req, res) => {
   res.json(await service.getPublicApplicantVerification(req.params.id));
 });
 
-module.exports = { submitApplication, verifyApplicant };
+const getSchoolInfo = wrap(async (req, res) => {
+  res.json(await service.getPublicSchoolInfo(req.params.schoolCode));
+});
+
+module.exports = { submitApplication, verifyApplicant, getSchoolInfo };

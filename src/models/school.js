@@ -40,8 +40,11 @@ module.exports = (sequelize, DataTypes) => {
     // school's cards render as — a school-wide choice, not per-card, so
     // every generated/printed card stays visually consistent.
     idCardTemplate: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'classic' },
-    // 'pending' (provisioned, no plan chosen yet) -> 'trial' | 'active' (plan
-    // chosen; 'active' after a paid plan is verified) -> 'suspended'.
+    // Vestigial: leftover from the multi-tenant SaaS version of this app
+    // (self-serve onboarding, platform billing/suspension). Single-tenant
+    // Lovenest is always 'active' — kept as unused columns rather than a
+    // destructive migration; see auth/service.js's login() for the one
+    // remaining (inert) read of `status`.
     status: {
       type: DataTypes.STRING(20),
       allowNull: false,
@@ -49,46 +52,15 @@ module.exports = (sequelize, DataTypes) => {
     },
     planCode: { type: DataTypes.STRING(30), allowNull: true },
     subscriptionExpiresAt: { type: DataTypes.DATE, allowNull: true },
-    // Captured once at onboarding — the only population figure available
-    // before any payment exists. Every renewal after the first successful
-    // payment instead re-evaluates the tier from a live COUNT of ACTIVE
-    // students (see billing/service.js#resolveCurrentTier), so this field is
-    // never updated after onboarding.
     studentPopulation: { type: DataTypes.INTEGER, allowNull: false },
-    // Snapshotted from the resolved plan at each startTrial/successful
-    // payment (see billing/service.js) so historical reporting reflects what
-    // the bundle *was*, even if config/plans.js pricing changes later.
     smsAllowance: { type: DataTypes.INTEGER, allowNull: true },
     smsUsedThisCycle: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
-    // Set only when status === 'suspended', to distinguish *why* — the 4
-    // platform-admin actions (block/suspend/deactivate) and the reminder
-    // cron's auto-suspend all set this alongside status; reactivating clears
-    // it back to null. See platform/service.js's ACTIONS map.
     statusReason: { type: DataTypes.STRING(30), allowNull: true },
     statusChangedAt: { type: DataTypes.DATE, allowNull: true },
-    // null = system/cron (e.g. non_payment_auto), not a platform admin.
     statusChangedByUserId: { type: DataTypes.UUID, allowNull: true },
-    // Idempotency flags for the daily reminder cron (billing/reminderService.js)
-    // — reset to null whenever subscriptionExpiresAt is extended (startTrial,
-    // applySuccessfulPayment), so a renewed school gets reminded again next cycle.
     reminder14SentAt: { type: DataTypes.DATE, allowNull: true },
     reminder3SentAt: { type: DataTypes.DATE, allowNull: true },
-    // Termly-indebtedness tracking (distinct from reminder14SentAt/
-    // reminder3SentAt above, which are pre-expiry "N days left" nudges).
-    // Set the first time billing/termBillingService.js#handleTermIndebtedness
-    // finds the school's current term ended/vacated with no successful
-    // Payment against it — either via the daily cron
-    // (billing/reminderService.js) finding an ended unpaid term, or via
-    // academic/service.js's setCurrentTerm/setCurrentAcademicYear finding
-    // the outgoing term unpaid. Both call sites converge on that one
-    // idempotent helper so the clock only ever starts once per debt cycle.
-    // Cleared unconditionally by billing/service.js#applySuccessfulPayment
-    // on any successful subscription payment — this system does not
-    // reconcile debt term-by-term; any payment clears the clock.
     termGraceEndsAt: { type: DataTypes.DATE, allowNull: true },
-    // Idempotency flag: has the "your term ended, please pay" notification
-    // (in-app + SMS/email) already fired for the currently-outstanding
-    // debt? Same set-once/clear-on-payment lifecycle as termGraceEndsAt.
     termPaymentPromptSentAt: { type: DataTypes.DATE, allowNull: true },
     // Per-tenant SMS/email sending credentials — each school sends under its
     // own identity rather than a shared platform account. All optional: a
@@ -164,8 +136,6 @@ module.exports = (sequelize, DataTypes) => {
     School.hasMany(models.StaffDuty, { foreignKey: 'schoolId' });
     School.hasMany(models.DutyRoster, { foreignKey: 'schoolId' });
     School.hasMany(models.GradeBand, { foreignKey: 'schoolId' });
-    School.hasMany(models.SchoolStatusEvent, { foreignKey: 'schoolId' });
-    School.hasOne(models.TrainingEnrollment, { foreignKey: 'schoolId' });
   };
 
   return School;

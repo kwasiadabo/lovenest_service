@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { User, Role, School, TrainingEnrollment } = require('../../models');
+const { User, Role, School } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../../utils/jwt');
 
@@ -17,7 +17,7 @@ async function login(email, password) {
     where: { email },
     include: [
       { model: Role, through: { attributes: [] } },
-      { model: School, include: [{ model: TrainingEnrollment }] },
+      { model: School },
     ],
   });
 
@@ -25,12 +25,11 @@ async function login(email, password) {
     throw new ApiError(401, 'Invalid email or password');
   }
 
-  // Pending/trial school users must still be able to log in (pending needs
-  // to reach plan selection; trial is a normal working state) — only a
-  // suspended school (manual block/suspend/deactivate, or the reminder
-  // cron's auto-suspend on non-payment) cuts off login.
+  // school.status is vestigial post-single-tenant-conversion (nothing sets
+  // it to anything but 'active' anymore) — this check is inert but harmless
+  // to leave in place.
   if (user.School && user.School.status === 'suspended') {
-    throw new ApiError(403, "This school's account is suspended. Contact the platform administrator.");
+    throw new ApiError(403, "This school's account is suspended. Contact the school administrator.");
   }
 
   const passwordMatches = await bcrypt.compare(password, user.passwordHash);
@@ -65,12 +64,6 @@ async function login(email, password) {
       schoolPhone: user.School ? user.School.phone : null,
       schoolEmail: user.School ? user.School.email : null,
       schoolPaymentInstructions: user.School ? user.School.paymentInstructions : null,
-      schoolPlanCode: user.School ? user.School.planCode : null,
-      subscriptionExpiresAt: user.School ? user.School.subscriptionExpiresAt : null,
-      // null for schools provisioned before this feature existed (no
-      // TrainingEnrollment row) — RequireActiveSchool.jsx only redirects on
-      // the explicit string 'pending', never on this being absent.
-      trainingPaymentStatus: user.School?.TrainingEnrollment?.paymentStatus || null,
     },
   };
 }

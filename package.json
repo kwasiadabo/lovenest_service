@@ -2,7 +2,7 @@
   "name": "vx-school-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Multi-tenant school management system API for pre-tertiary schools in Ghana",
+  "description": "School management system API for Lovenest International Christian School",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -11,7 +11,6 @@
     "migrate": "sequelize-cli db:migrate",
     "migrate:undo": "sequelize-cli db:migrate:undo",
     "seed": "sequelize-cli db:seed:all",
-    "verify:tenant-isolation": "node scripts/verifyTenantIsolation.js",
     "test": "NODE_ENV=test jest --runInBand --forceExit",
     "test:unit": "NODE_ENV=test jest --runInBand --forceExit tests/unit",
     "test:integration": "NODE_ENV=test jest --runInBand --forceExit tests/integration",

@@ -13,7 +13,7 @@ async function start() {
   }
   app.listen(PORT, () => {
     // eslint-disable-next-line no-console
-    console.log(`VX-School API listening on port ${PORT}`);
+    console.log(`Lovenest API listening on port ${PORT}`);
   });
 }
 

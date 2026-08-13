@@ -11,7 +11,7 @@ const { postJournalEntry, reverseEntryFor } = require('../accounting/ledgerPoste
 const { FEE_CATEGORY_ACCOUNT_CODES } = require('../../utils/defaultChartOfAccounts');
 const { resolveParentRecipients } = require('../messaging/recipients');
 const { sendBatch } = require('../messaging/service');
-const { notifyPreschoolProspectus } = require('./notify');
+const { notifyPreschoolProspectus, notifyParentLoginCredentials } = require('./notify');
 
 const assignmentInclude = [
   { model: Class, include: [Level] },
@@ -127,13 +127,34 @@ async function createParentLogin(schoolId, studentId, relationship) {
     fullName: parent.fullName, email: parent.email, roles: ['PARENT'],
   });
   await parent.update({ userId: created.id });
-  return created;
+
+  return { ...created, notified: await sendParentLoginCredentials(schoolId, parent, created.defaultPassword, false) };
 }
 
 async function resetParentLoginPassword(schoolId, studentId, relationship) {
   const parent = await resolveParentForRelationship(schoolId, studentId, relationship);
   if (!parent.userId) throw new ApiError(400, 'This parent does not have a portal login yet.');
-  return usersService.resetUserPassword(schoolId, parent.userId);
+  const result = await usersService.resetUserPassword(schoolId, parent.userId);
+
+  return { ...result, notified: await sendParentLoginCredentials(schoolId, parent, result.defaultPassword, true) };
+}
+
+// Best-effort — a failed SMS/email must never fail the login creation/reset
+// that already happened above; the admin still has `defaultPassword` in the
+// API response as a manual fallback if neither channel is configured for
+// this school (or delivery otherwise fails). Same swallowed-catch
+// convention as recordAdmissionPayment's notifyPreschoolProspectus call
+// below. Returns a { sms, email } status summary (rather than throwing) so
+// the caller can tell the admin whether delivery actually went out.
+async function sendParentLoginCredentials(schoolId, parent, password, isReset) {
+  try {
+    const school = await School.findByPk(schoolId);
+    return await notifyParentLoginCredentials(schoolId, {
+      school, parent, password, isReset,
+    });
+  } catch {
+    return { sms: null, email: null };
+  }
 }
 
 // ---- Admission payments ----

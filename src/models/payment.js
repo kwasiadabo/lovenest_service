@@ -6,11 +6,11 @@ module.exports = (sequelize, DataTypes) => {
       primaryKey: true,
     },
     schoolId: { type: DataTypes.UUID, allowNull: false },
-    // 'subscription' (default) | 'training' — branches applySuccessfulPayment
-    // (billing/service.js) to either activate the subscription plan or mark
-    // the one-time TrainingEnrollment paid. planCode still stores a pseudo
-    // code ('training_in_person'/'training_online') for training payments,
-    // for ledger readability only — never looked up in config/plans.js.
+    // Only 'fee_payment' (a parent paying a child's school-fee balance via
+    // parentPortal/service.js) is written today — the 'subscription'/
+    // 'training' purposes were part of the multi-tenant platform-billing
+    // system, since removed. defaultValue is a leftover, always overridden
+    // explicitly by every current writer.
     purpose: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'subscription' },
     planCode: { type: DataTypes.STRING(30), allowNull: false },
     amountPesewas: { type: DataTypes.INTEGER, allowNull: false },
@@ -19,15 +19,11 @@ module.exports = (sequelize, DataTypes) => {
     status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'pending' },
     paidAt: DataTypes.DATE,
     rawResponse: DataTypes.TEXT,
-    // Which Term this subscription payment settles (see
-    // billing/service.js#initializePayment) — null only for a school's very
-    // first payment, made before any Term has been configured yet, in which
-    // case applySuccessfulPayment falls back to plan.durationDays for
-    // expiry instead of a term's endDate. Never set for purpose:'training'.
+    // Vestigial: only used by the removed multi-tenant platform-billing
+    // system, never set by the current 'fee_payment' writer.
     termId: { type: DataTypes.UUID, allowNull: true },
-    // Only set for purpose: 'fee_payment' — a parent paying a specific
-    // child's school-fee balance via parentPortal, as distinct from every
-    // other purpose here which is school-level (subscription/training).
+    // The child whose fee balance this payment settles (every current row
+    // is purpose: 'fee_payment', written from parentPortal/service.js).
     studentId: { type: DataTypes.UUID, allowNull: true },
   }, {
     tableName: 'payments',

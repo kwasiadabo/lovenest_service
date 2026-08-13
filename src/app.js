@@ -3,7 +3,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 
 const authRoutes = require('./modules/auth/routes');
-const platformRoutes = require('./modules/platform/routes');
 const academicRoutes = require('./modules/academic/routes');
 const usersRoutes = require('./modules/users/routes');
 const rolePermissionsRoutes = require('./modules/rolePermissions/routes');
@@ -47,9 +46,6 @@ const newslettersRoutes = require('./modules/newsletters/routes');
 const issuesRoutes = require('./modules/issues/routes');
 const incidentsRoutes = require('./modules/incidents/routes');
 const healthRoutes = require('./modules/health/routes');
-const billingRoutes = require('./modules/billing/routes');
-const billingController = require('./modules/billing/controller');
-const onboardingRoutes = require('./modules/onboarding/routes');
 const admissionsRoutes = require('./modules/admissions/routes');
 const admissionsPublicRoutes = require('./modules/admissions/publicRoutes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -58,15 +54,6 @@ const app = express();
 
 app.use(helmet());
 app.use(cors());
-
-// Paystack calls this directly (no JWT) and its signature check needs the
-// exact raw request bytes, so this must be registered — with its own raw
-// body parser — before the global express.json() below consumes the body.
-app.post(
-  '/api/v1/billing/webhook',
-  express.raw({ type: 'application/json' }),
-  billingController.webhook,
-);
 
 app.use(express.json());
 
@@ -83,9 +70,6 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // unauthenticated /api/v1/public/* prefix must live in this block, not
 // mixed in further down near its sibling authenticated router.
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/platform', platformRoutes);
-app.use('/api/v1/billing', billingRoutes);
-app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/api/v1/public/report-cards', reportCardsPublicRoutes);
 app.use('/api/v1/public/admissions', admissionsPublicRoutes);
 app.use('/api/v1', academicRoutes);

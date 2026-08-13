@@ -2,6 +2,7 @@ const express = require('express');
 const controller = require('./controller');
 const {
   validateSalaryStructure, validatePayrollRun, validatePayPayrollRun, validateStatutoryRemittance,
+  validateSsnitRate, validatePayeTaxBands,
 } = require('./validators');
 const { authenticate } = require('../../middleware/auth');
 const { requireTenant } = require('../../middleware/tenantScope');
@@ -44,6 +45,8 @@ router.get('/my/payslips', controller.listMyPayslips);
 router.get('/my/payslips/:id', controller.getMyPayslip);
 
 router.get('/payroll/statutory-settings', readRoles, controller.getStatutorySettings);
+router.post('/payroll/statutory-settings/ssnit-rate', adminOnly, validateSsnitRate, controller.setSsnitRate);
+router.post('/payroll/statutory-settings/paye-tax-bands', adminOnly, validatePayeTaxBands, controller.setPayeTaxBands);
 router.get('/payroll/analytics', readRoles, controller.getPayrollAnalytics);
 
 module.exports = router;

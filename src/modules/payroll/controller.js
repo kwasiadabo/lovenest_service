@@ -64,6 +64,14 @@ const getStatutorySettings = wrap(async (req, res) => {
   res.json(await payrollService.getStatutorySettings());
 });
 
+const setSsnitRate = wrap(async (req, res) => {
+  res.status(201).json(await payrollService.setSsnitRate(req.body));
+});
+
+const setPayeTaxBands = wrap(async (req, res) => {
+  res.status(201).json(await payrollService.setPayeTaxBands(req.body));
+});
+
 const getPayrollAnalytics = wrap(async (req, res) => {
   const { from, to, runIds } = req.query;
   const runIdList = typeof runIds === 'string' && runIds.length
@@ -88,5 +96,7 @@ module.exports = {
   listMyPayslips,
   getMyPayslip,
   getStatutorySettings,
+  setSsnitRate,
+  setPayeTaxBands,
   getPayrollAnalytics,
 };
